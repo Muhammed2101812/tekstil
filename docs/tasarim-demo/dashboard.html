@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tasarım Demo — Bugün (PLAN.md §6.3 + §7)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+  /* ===== §7.1 Renk token'ları ===== */
+  :root {
+    --primary:#3B5BDB; --accent:#FF7A59; --bg:#F6F7FB; --surface:#FFFFFF;
+    --text:#101828; --muted:#667085; --border:#E4E7EC;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.06);
+    --primary-soft:#EDF2FF;
+  }
+  .dark {
+    --primary:#748FFC; --accent:#FF9E85; --bg:#0E1116; --surface:#171B22;
+    --text:#F2F4F7; --muted:#98A2B3; --border:#2A303A;
+    --shadow:none; /* §7.3: koyu temada gölge yerine ince kenar */
+    --primary-soft:#1C2340;
+  }
+  /* Durum renkleri */
+  :root{
+    --ok:#12B76A; --absent:#F04438; --late:#F79009; --early:#EF6820;
+    --half:#15B79E; --leave:#7A5AF8; --sick:#2E90FA; --unpaid:#667085;
+  }
+
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    font-family:'Plus Jakarta Sans', system-ui, sans-serif;
+    background:#E9ECF2; color:#101828; min-height:100vh;
+    display:flex; gap:48px; justify-content:center; align-items:flex-start;
+    padding:40px 24px; flex-wrap:wrap;
+  }
+  .num { font-variant-numeric: tabular-nums; } /* §7.2 eşit genişlikli rakam */
+
+  /* ===== Telefon çerçevesi ===== */
+  .phone {
+    width:390px; height:844px; border-radius:48px; padding:12px;
+    background:#0B0D12; box-shadow:0 30px 80px rgba(0,0,0,.25); flex-shrink:0;
+  }
+  .screen {
+    width:100%; height:100%; border-radius:38px; overflow:hidden; position:relative;
+    background:var(--bg); color:var(--text); display:flex; flex-direction:column;
+    transition: background .25s, color .25s;
+  }
+  .statusbar { height:44px; display:flex; justify-content:space-between; align-items:center;
+    padding:0 28px; font-size:14px; font-weight:600; }
+  .content { flex:1; overflow-y:auto; padding:8px 20px 120px; scrollbar-width:none; } /* §7.3 kenar boşluğu 20 */
+  .content::-webkit-scrollbar{display:none}
+
+  /* Başlık */
+  .header { display:flex; justify-content:space-between; align-items:flex-start; margin:8px 0 20px; }
+  .greet { font-size:22px; font-weight:700; letter-spacing:-.2px; } /* Başlık 22/700 */
+  .date { font-size:14px; font-weight:500; color:var(--muted); margin-top:4px; display:flex; align-items:center; gap:6px; }
+  .tag { font-size:12px; font-weight:600; padding:2px 8px; border-radius:999px; background:var(--primary-soft); color:var(--primary); }
+  .avatar { width:48px; height:48px; border-radius:50%; background:linear-gradient(135deg,var(--primary),#5C7CFA);
+    color:#fff; display:grid; place-items:center; font-weight:700; font-size:16px; border:none; cursor:pointer; }
+
+  /* Kart — radius 16, padding 16–20 */
+  .card { background:var(--surface); border-radius:16px; padding:20px; box-shadow:var(--shadow);
+    border:1px solid transparent; transition: background .25s; }
+  .dark .card { border-color:var(--border); }
+
+  .hero-title { font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.6px;
+    display:flex; align-items:center; gap:6px; }
+  .hero-main { font-size:18px; font-weight:600; margin:8px 0 16px; } /* Alt başlık 18/600 */
+  .hero-main.done { display:flex; align-items:center; gap:10px; font-size:32px; font-weight:700; } /* Display */
+  .hero-main small { font-size:16px; color:var(--muted); font-weight:500; }
+  .btn { width:100%; min-height:52px; border:none; border-radius:14px; background:var(--primary); color:#fff;
+    font:600 16px 'Plus Jakarta Sans'; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;
+    transition: transform .2s cubic-bezier(.34,1.56,.64,1); }
+  .btn:active { transform:scale(.97); }
+  .btn.secondary { background:var(--primary-soft); color:var(--primary); }
+  .progress { height:8px; border-radius:99px; background:var(--border); overflow:hidden; margin-bottom:16px; }
+  .progress > div { height:100%; width:89%; background:var(--ok); border-radius:99px; }
+  .pills { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+
+  /* Durum etiketi: açık zemin + koyu yazı + ikon */
+  .pill { display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600; padding:4px 10px; border-radius:999px; }
+  .pill svg { width:14px; height:14px; }
+
+  /* İstatistik kartları 2x2 */
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
+  .stat { padding:16px; min-height:112px; display:flex; flex-direction:column; justify-content:space-between; cursor:pointer; }
+  .stat .ico { width:36px; height:36px; border-radius:10px; display:grid; place-items:center; }
+  .stat .ico svg { width:20px; height:20px; }
+  .stat .label { font-size:14px; font-weight:500; color:var(--muted); margin-top:10px; }
+  .stat .value { font-size:22px; font-weight:700; margin-top:2px; }
+  .stat .value small { font-size:14px; color:var(--muted); font-weight:500; }
+
+  .section { font-size:18px; font-weight:600; margin:28px 0 12px; display:flex; justify-content:space-between; align-items:center; }
+  .section a { font-size:14px; color:var(--primary); text-decoration:none; font-weight:600; }
+
+  .list { padding:4px 0; }
+  .row { display:flex; align-items:center; gap:14px; padding:12px 16px; min-height:56px; }
+  .row + .row { border-top:1px solid var(--border); }
+  .row .ri { width:40px; height:40px; border-radius:12px; display:grid; place-items:center; flex-shrink:0; }
+  .row .ri svg { width:20px; height:20px; }
+  .row .rt { font-size:16px; font-weight:500; }
+  .row .rs { font-size:14px; color:var(--muted); font-weight:500; }
+  .row .chev { margin-left:auto; color:var(--muted); width:18px; }
+
+  /* Mini grafik */
+  .chart-head { display:flex; justify-content:space-between; align-items:baseline; }
+  .chart-head .big { font-size:22px; font-weight:700; }
+  .bars { display:flex; align-items:flex-end; gap:4px; height:72px; margin-top:16px; }
+  .bars div { flex:1; border-radius:4px 4px 2px 2px; background:var(--primary); opacity:.85; }
+  .bars div.low { background:var(--late); }
+  .bars div.off { background:var(--border); opacity:1; }
+
+  /* ===== Alt sekme çubuğu + ➕ ===== */
+  .tabbar { position:absolute; left:0; right:0; bottom:0; height:88px; background:var(--surface);
+    border-top:1px solid var(--border); display:flex; justify-content:space-around; align-items:flex-start; padding-top:10px; }
+  .tab { display:flex; flex-direction:column; align-items:center; gap:4px; font-size:12px; font-weight:600; color:var(--muted);
+    min-width:56px; min-height:48px; cursor:pointer; }
+  .tab svg { width:24px; height:24px; }
+  .tab.active { color:var(--primary); }
+  .fab { width:60px; height:60px; border-radius:50%; background:var(--accent); color:#fff; display:grid; place-items:center;
+    margin-top:-26px; box-shadow:0 8px 20px rgba(255,122,89,.45); border:4px solid var(--surface); cursor:pointer;
+    transition: transform .2s cubic-bezier(.34,1.56,.64,1); }
+  .fab:active { transform:scale(.92) rotate(45deg); }
+  .fab svg { width:28px; height:28px; }
+
+  /* Skeleton */
+  .sk { background:linear-gradient(90deg,var(--border) 25%, color-mix(in srgb,var(--border) 50%, var(--surface)) 50%, var(--border) 75%);
+    background-size:200% 100%; animation:sh 1.2s infinite; border-radius:10px; }
+  @keyframes sh { to { background-position:-200% 0; } }
+
+  /* ===== Yan panel (açıklamalar) ===== */
+  .side { width:380px; color:#101828; }
+  .side h1 { font-size:22px; font-weight:800; margin-bottom:4px; }
+  .side p.sub { color:#667085; font-size:14px; margin-bottom:20px; }
+  .panel { background:#fff; border-radius:16px; padding:18px; margin-bottom:16px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  .panel h3 { font-size:13px; text-transform:uppercase; letter-spacing:.6px; color:#667085; margin-bottom:12px; }
+  .controls { display:flex; flex-direction:column; gap:10px; }
+  .seg { display:flex; background:#F2F4F7; border-radius:12px; padding:4px; }
+  .seg button { flex:1; border:none; background:none; padding:9px; border-radius:9px; font:600 13px 'Plus Jakarta Sans'; color:#667085; cursor:pointer; }
+  .seg button.on { background:#fff; color:#101828; box-shadow:0 1px 3px rgba(0,0,0,.1); }
+  .sw { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .sw div { font-size:11px; font-weight:600; color:#475467; }
+  .sw span { display:block; height:36px; border-radius:10px; margin-bottom:4px; border:1px solid rgba(0,0,0,.06); }
+  .type div { margin-bottom:6px; }
+  .side ul { padding-left:18px; font-size:13px; color:#475467; line-height:1.7; }
+</style>
+</head>
+<body>
+
+<!-- ===================== TELEFON ===================== -->
+<div class="phone">
+  <div class="screen" id="screen">
+    <div class="statusbar num"><span>09:41</span><span style="display:flex;gap:6px"><i data-lucide="signal" style="width:16px"></i><i data-lucide="wifi" style="width:16px"></i><i data-lucide="battery-full" style="width:18px"></i></span></div>
+
+    <div class="content" id="content"></div>
+
+    <nav class="tabbar">
+      <div class="tab active"><i data-lucide="house"></i>Bugün</div>
+      <div class="tab"><i data-lucide="clipboard-check"></i>Puantaj</div>
+      <div class="fab" title="Hızlı İşlem"><i data-lucide="plus"></i></div>
+      <div class="tab"><i data-lucide="users"></i>Personel</div>
+      <div class="tab"><i data-lucide="wallet"></i>Para</div>
+    </nav>
+  </div>
+</div>
+
+<!-- ===================== YAN PANEL ===================== -->
+<div class="side">
+  <h1>Bugün ekranı — demo</h1>
+  <p class="sub">PLAN.md §6.3 (yerleşim) ve §7 (tasarım sistemi) birebir uygulandı.</p>
+
+  <div class="panel">
+    <h3>Önizleme</h3>
+    <div class="controls">
+      <div class="seg" id="themeSeg"><button class="on" data-v="light">Açık tema</button><button data-v="dark">Koyu tema</button></div>
+      <div class="seg" id="stateSeg"><button class="on" data-v="todo">Yoklama girilmedi</button><button data-v="done">Girildi</button><button data-v="loading">Yükleniyor</button></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>§7.1 Renkler — Lacivert &amp; Mercan</h3>
+    <div class="sw">
+      <div><span style="background:#3B5BDB"></span>Primary</div>
+      <div><span style="background:#FF7A59"></span>Accent</div>
+      <div><span style="background:#F6F7FB"></span>Background</div>
+      <div><span style="background:#101828"></span>Text</div>
+    </div>
+    <h3 style="margin-top:16px">Durum renkleri (renk + ikon + yazı)</h3>
+    <div class="pills" id="legend" style="margin:0"></div>
+  </div>
+
+  <div class="panel type">
+    <h3>§7.2 Tipografi — Plus Jakarta Sans</h3>
+    <div style="font-size:32px;font-weight:700">Display 32</div>
+    <div style="font-size:22px;font-weight:700">Başlık 22</div>
+    <div style="font-size:18px;font-weight:600">Alt başlık 18</div>
+    <div style="font-size:16px;font-weight:500">Gövde 16 — ğüşıöç ĞÜŞİÖÇ</div>
+    <div style="font-size:12px;font-weight:600;color:#667085">ETİKET 12</div>
+  </div>
+
+  <div class="panel">
+    <h3>Uygulanan kurallar</h3>
+    <ul>
+      <li>Kenar boşluğu 20, kart iç boşluğu 16–20, 4pt ızgara</li>
+      <li>Köşe: kart 16 · buton 14 · küçük 10</li>
+      <li>Çok yumuşak gölge; koyu temada gölge yerine kenar çizgisi</li>
+      <li>Dokunma alanı ≥ 48dp, gövde ≥ 16pt</li>
+      <li>Para/saat için tabular rakamlar, ₺1,2 Mn biçimi</li>
+      <li>Alt sekme: 4 sekme + ortada mercan ➕</li>
+      <li>Ana buton ekranın alt yarısında erişilebilir</li>
+      <li>Yüklenirken iskelet (skeleton), boş ekran yok</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const S = {
+  ok:['#12B76A','check','Geldi'], absent:['#F04438','x','Gelmedi'], late:['#F79009','alarm-clock','Geç'],
+  early:['#EF6820','arrow-up-right','Erken çıktı'], half:['#15B79E','circle-half','Yarım gün'],
+  leave:['#7A5AF8','sun','İzin'], sick:['#2E90FA','cross','Rapor'], unpaid:['#667085','pause','Ücretsiz izin']
+};
+const pill = (k, txt) => {
+  const [c, ic, l] = S[k];
+  return `<span class="pill" style="background:${c}1F;color:${c}"><i data-lucide="${ic}"></i>${txt ?? l}</span>`;
+};
+document.getElementById('legend').innerHTML = Object.keys(S).map(k => pill(k)).join('');
+
+const iconBox = (ic, c) => `<div class="ico" style="background:${c}1F;color:${c}"><i data-lucide="${ic}"></i></div>`;
+const bars = [92,95,0,0,90,97,93,88,96,0,0,94,98,91,70,95,0,0,93,96,97,92,94,0,0,95,89,98,96,97];
+
+function render(state){
+  const c = document.getElementById('content');
+  if(state === 'loading'){
+    c.innerHTML = `
+      <div class="header"><div><div class="sk" style="width:190px;height:26px"></div><div class="sk" style="width:150px;height:16px;margin-top:8px"></div></div><div class="sk" style="width:48px;height:48px;border-radius:50%"></div></div>
+      <div class="sk" style="height:150px;border-radius:16px"></div>
+      <div class="grid">${'<div class="sk" style="height:112px;border-radius:16px"></div>'.repeat(4)}</div>
+      <div class="sk" style="width:120px;height:20px;margin:28px 0 12px"></div>
+      <div class="sk" style="height:180px;border-radius:16px"></div>`;
+    return;
+  }
+  const hero = state === 'todo' ? `
+      <div class="hero-title"><i data-lucide="clipboard-list" style="width:14px"></i>Bugünün Yoklaması</div>
+      <div class="hero-main">Henüz girilmedi</div>
+      <p style="font-size:14px;color:var(--muted);margin:-8px 0 16px">47 kişi · 08:00–18:00 · Herkes “Geldi” başlar, sadece istisnaları işaretle.</p>
+      <button class="btn">Yoklamayı Başlat <i data-lucide="arrow-right" style="width:20px"></i></button>` : `
+      <div class="hero-title"><i data-lucide="clipboard-check" style="width:14px"></i>Bugünün Yoklaması</div>
+      <div class="hero-main done num">42<small>/ 47 işte</small><span style="margin-left:auto">${pill('ok','Tamamlandı')}</span></div>
+      <div class="progress"><div></div></div>
+      <div class="pills">${pill('absent','2 Gelmedi')}${pill('late','1 Geç')}${pill('leave','1 İzin')}${pill('sick','1 Rapor')}</div>
+      <button class="btn secondary">Yoklamayı Düzenle</button>`;
+
+  c.innerHTML = `
+    <div class="header">
+      <div>
+        <div class="greet">Günaydın, Muhammed</div>
+        <div class="date">5 Ekim Pazartesi <span class="tag">İş günü</span></div>
+      </div>
+      <button class="avatar" title="Menü: Raporlar, Ayarlar…">YT</button>
+    </div>
+
+    <div class="card">${hero}</div>
+
+    <div class="grid">
+      <div class="card stat">${iconBox('users','#12B76A')}<div><div class="label">İşte</div><div class="value num">${state==='done'?'42':'—'} <small>/ 47</small></div></div></div>
+      <div class="card stat">${iconBox('hand-coins','#FF7A59')}<div><div class="label">Açık avans</div><div class="value num">₺18.500</div></div></div>
+      <div class="card stat">${iconBox('calendar-x','#F04438')}<div><div class="label">Bu ay devamsızlık</div><div class="value num">6 <small>gün</small></div></div></div>
+      <div class="card stat">${iconBox('banknote','#3B5BDB')}<div><div class="label">Tahmini maaş</div><div class="value num">₺1,2 Mn</div></div></div>
+    </div>
+
+    <div class="section">Yaklaşanlar <a href="#">Takvim</a></div>
+    <div class="card list" style="padding:4px 0">
+      <div class="row"><div class="ri" style="background:#F044381F;color:#F04438"><i data-lucide="flag"></i></div><div><div class="rt">Cumhuriyet Bayramı</div><div class="rs">29 Ekim Perşembe · Resmî tatil</div></div><i data-lucide="chevron-right" class="chev"></i></div>
+      <div class="row"><div class="ri" style="background:#15B79E1F;color:#15B79E"><i data-lucide="briefcase"></i></div><div><div class="rt">Ek çalışma günü</div><div class="rs">Cumartesi 08:00–13:00 · 12 kişi</div></div><i data-lucide="chevron-right" class="chev"></i></div>
+      <div class="row"><div class="ri" style="background:#3B5BDB1F;color:#3B5BDB"><i data-lucide="wallet"></i></div><div><div class="rt">Maaş günü</div><div class="rs">5 Kasım · 31 gün kaldı</div></div><i data-lucide="chevron-right" class="chev"></i></div>
+    </div>
+
+    <div class="section">Devam oranı</div>
+    <div class="card">
+      <div class="chart-head"><span style="font-size:14px;color:var(--muted);font-weight:500">Son 30 gün</span><span class="big num">%94,2</span></div>
+      <div class="bars">${bars.map(v => `<div class="${v===0?'off':v<80?'low':''}" style="height:${v===0?8:Math.max(10,(v-60)*2.5)}%"></div>`).join('')}</div>
+    </div>`;
+}
+
+function seg(id, fn){
+  const el = document.getElementById(id);
+  el.addEventListener('click', e => {
+    const b = e.target.closest('button'); if(!b) return;
+    el.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    fn(b.dataset.v); lucide.createIcons();
+  });
+}
+seg('themeSeg', v => document.getElementById('screen').classList.toggle('dark', v === 'dark'));
+seg('stateSeg', v => render(v));
+render('todo'); lucide.createIcons();
+</script>
+</body>
+</html>

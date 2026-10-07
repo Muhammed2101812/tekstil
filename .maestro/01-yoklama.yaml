@@ -1,0 +1,17 @@
+# Günlük yoklama akışı: puantajda bir kişiye "Gelmedi" işaretle (PLAN 14.1 E2E)
+appId: com.tekstil.takip
+---
+- launchApp
+- tapOn: "Puantaj"
+- assertVisible: "İş günü"
+- longPressOn:
+    text: "Dikim"
+    optional: true
+- tapOn:
+    text: ".*" # ilk satır
+    index: 0
+- tapOn: "Gelmedi"
+- assertVisible:
+    text: "Gelmedi"
+- tapOn: "✓ Yoklamayı Tamamla"
+- assertVisible: "Yoklama tamamlandı"

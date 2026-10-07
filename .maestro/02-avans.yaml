@@ -1,0 +1,17 @@
+# Avans verme + bordro kesinleştirme akışı (PLAN 14.1 E2E)
+# Not: kurulum yapılmış ve en az 1 çalışan eklenmiş olmalı
+appId: com.tekstil.takip
+---
+- launchApp
+- tapOn: "Para"
+- tapOn: "Avans Ver"
+- tapOn: ".*" # ilk çalışan çipi
+- tapOn: "Tutar"
+- tapOn: "2"
+- tapOn: "0"
+- tapOn: "0"
+- tapOn: "0"
+- tapOn: "Tamam"
+- tapOn: "3 ay"
+- tapOn: "Avansı Ver"
+- assertVisible: "avans kaydedildi"

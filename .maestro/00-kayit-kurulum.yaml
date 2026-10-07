@@ -1,0 +1,21 @@
+# Kayıt + Kurulum akışı (PLAN 14.1 E2E)
+# Çalıştırmak için: maestro test .maestro/00-kayit-kurulum.yaml
+appId: com.tekstil.takip
+---
+- launchApp
+- tapOn: "Başlayalım"
+- tapOn:
+    id: "ad-soyad" # alternatif metin: yaklaşık konum
+- inputText: "Test Kullanıcı"
+- tapOn: "E-posta"
+- inputText: "test+kurulum@atolye.dev"
+- tapOn: "Şifre"
+- inputText: "Test-1234"
+- tapOn: "Devam Et"
+- tapOn: "Firma Adı *"
+- inputText: "Test Atölye"
+- tapOn: "Devam"
+- tapOn: "Devam"
+- tapOn: "Bu adımı atla"
+- tapOn: "Sonra eklerim"
+- assertVisible: "Bugün"
