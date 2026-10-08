@@ -85,19 +85,21 @@ Yerel çalışma dizinindeki `.env` dosyasına Google Web Client ID'yi ekleyin (
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=buraya_google_client_id_yazilacak.apps.googleusercontent.com
 ```
 
-### Adım 5: GitHub Secrets Yapılandırması (Uzak SQL Yedekleri İçin)
-GitHub Actions workflow'unun (`yedek.yml`) çalışabilmesi için `Muhammed2101812/tekstil` deposuna 2 adet secret girilmelidir:
-1. **`SUPABASE_DB_URL`**:
+### Adım 5: GitHub Secrets ve İş Akışı Yetkisi
+1. **`SUPABASE_DB_URL` Secret'ı:**
    - Supabase Dashboard → Project Settings → Database → Connection string → URI (Pooler veya Direct).
    - Örnek format: `postgresql://postgres.[PROJECT-REF]:[SIFRE]@aws-0-eu-central-1.pooler.supabase.com:6543/postgres`
    - Terminalden ekleme: `gh secret set SUPABASE_DB_URL --repo Muhammed2101812/tekstil`
-2. **`BACKUP_REPO_TOKEN`**:
+2. **`BACKUP_REPO_TOKEN` Secret'ı:**
    - GitHub → Settings → Developer Settings → Personal Access Tokens.
    - `Muhammed2101812/tekstil-yedekler` deposuna yazma (`repo` yetkisi) hakkı olan bir PAT oluşturun.
    - Terminalden ekleme: `gh secret set BACKUP_REPO_TOKEN --repo Muhammed2101812/tekstil`
+3. **Workflow Dosyasını Push Etme Notu:**
+   - Uygulama kodları, dokümanlar ve testler `75d0792` commiti ile `origin master`'a başarıyla gönderilmiştir.
+   - `.github/workflows/yedek.yml` dosyası yerel depoda `3cd0c7f` commit'i olarak hazır beklemektedir. GitHub, `.github/workflows/` altındaki dosyaların push edilebilmesi için kullanılan PAT belirtecinde `workflow` kapsamı ("Update GitHub Action workflows") zorunlu kılar. GitHub hesabınızdan kişisel erişim belirtecinize `workflow` yetkisini işaretledikten sonra `git push origin master` diyerek iş akışını GitHub'a iletebilirsiniz.
 
 ### Adım 6: Workflow İlk Elle Çalıştırma
-Secret'lar girildikten sonra döküm akışını test edin:
+Secret'lar girildikten ve iş akışı push edildikten sonra döküm akışını test edin:
 ```bash
 gh workflow run yedek.yml --repo Muhammed2101812/tekstil
 ```
