@@ -125,15 +125,22 @@ export async function pullAll(): Promise<{ pulled: number }> {
     'payroll_items', 'salary_payments',
   ];
   const { useDataStore } = await import('./store');
-  let last = '1970-01-01T00:00:00Z';
-  try {
-    const raw = await AsyncStorage.getItem(LAST_SYNC_KEY);
-    if (raw) last = raw;
-  } catch {
-    // yoksay
+  let threshold = '1970-01-01T00:00:00Z';
+  const hasLocalData = (useDataStore.getState().db.employees?.length ?? 0) > 0;
+  if (hasLocalData) {
+    try {
+      const raw = await AsyncStorage.getItem(LAST_SYNC_KEY);
+      if (raw) {
+        const rawTime = new Date(raw).getTime();
+        if (!Number.isNaN(rawTime)) {
+          // Saat kayması payı: son başarılı senkrondan 5 dakika öncesi
+          threshold = new Date(Math.max(0, rawTime - 5 * 60 * 1000)).toISOString();
+        }
+      }
+    } catch {
+      // yoksay
+    }
   }
-  const since = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // saat kayması payı
-  const threshold = last > since ? last : since;
 
   let pulled = 0;
   const patch: Partial<DataDB> = {};

@@ -1,7 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import { AppState, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
+import * as WebBrowser from 'expo-web-browser';
 import { Stack, useRouter, useSegments } from 'expo-router';
+
 import { StatusBar } from 'expo-status-bar';
 import {
   useFonts,
@@ -23,6 +25,7 @@ import { OfflineBanner } from '../ui/Feedback';
 import { useSyncStatus } from '../data/hooks';
 import { setupNotifications } from '../utils/notifications';
 
+WebBrowser.maybeCompleteAuthSession();
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 export const unstable_settings = {

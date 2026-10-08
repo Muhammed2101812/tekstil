@@ -1,12 +1,13 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
+import * as AuthSession from 'expo-auth-session';
 import { isSupabaseConfigured, supabase } from './supabase';
 import { uuid } from './id';
 
 /**
  * Kimlik doğrulama.
- * - Supabase modu: e-posta + şifre (Supabase Auth), oturum güvenli depoda.
+ * - Supabase modu: e-posta + şifre (Supabase Auth) veya Google ile giriş, oturum güvenli depoda.
  * - Cihaz modu (.env yok): tek cihazda yerel hesap — uygulama anında
  *   denenebilsin diye. Parola SHA-256 ile özetlenir, sunucuya hiçbir şey gitmez.
  */
@@ -24,8 +25,10 @@ interface AuthState {
   email: string | null;
   name: string | null;
   ready: boolean;
+  isGoogleConfigured: boolean;
   signUp: (email: string, password: string, name: string) => Promise<string | null>;
   signIn: (email: string, password: string) => Promise<string | null>;
+  signInWithGoogle: () => Promise<string | null>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<string | null>;
 }
@@ -59,6 +62,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [name, setName] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
 
+  const isGoogleConfigured = isSupabaseConfigured && Boolean(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim());
+
+  const extractName = (user: { user_metadata?: unknown } | null): string | null => {
+    if (!user?.user_metadata) return null;
+    const m = user.user_metadata as { name?: string; full_name?: string };
+    return m.full_name ?? m.name ?? null;
+  };
+
   useEffect(() => {
     let sub: { data: { subscription: { unsubscribe: () => void } } } | null = null;
     (async () => {
@@ -67,11 +78,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const user = data.session?.user ?? null;
         setUserId(user?.id ?? null);
         setEmail(user?.email ?? null);
-        setName(((user?.user_metadata as { name?: string } | null)?.name) ?? null);
+        setName(extractName(user));
         sub = supabase.auth.onAuthStateChange((_event, session) => {
           setUserId(session?.user?.id ?? null);
           setEmail(session?.user?.email ?? null);
-          setName(((session?.user?.user_metadata as { name?: string } | null)?.name) ?? null);
+          setName(extractName(session?.user ?? null));
         });
       } else {
         const raw = await AsyncStorage.getItem(LOCAL_SESSION_KEY);
@@ -94,6 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email,
       name,
       ready,
+      isGoogleConfigured,
       async signUp(mail, password, ad) {
         if (isSupabaseConfigured) {
           const { error } = await supabase.auth.signUp({
@@ -139,15 +151,97 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setName(account.name);
         return null;
       },
+      async signInWithGoogle() {
+        if (!isSupabaseConfigured) {
+          return 'Google ile giriş cihaz modunda kullanılamaz. Bulut senkronu için .env yapılandırması gereklidir.';
+        }
+        const clientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim();
+        if (!clientId) {
+          return 'Google ile giriş henüz yapılandırılmamış (EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID eksik).';
+        }
+
+        try {
+          const rawNonce = await Crypto.digestStringAsync(
+            Crypto.CryptoDigestAlgorithm.SHA256,
+            `${Date.now()}-${Math.random()}-${Math.random()}`,
+            { encoding: Crypto.CryptoEncoding.HEX }
+          );
+          const hashedNonce = await Crypto.digestStringAsync(
+            Crypto.CryptoDigestAlgorithm.SHA256,
+            rawNonce,
+            { encoding: Crypto.CryptoEncoding.HEX }
+          );
+
+          const redirectUri = AuthSession.makeRedirectUri({
+            preferLocalhost: true,
+          });
+
+          const discovery: AuthSession.DiscoveryDocument = {
+            authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+            tokenEndpoint: 'https://oauth2.googleapis.com/token',
+            revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
+            userInfoEndpoint: 'https://openidconnect.googleapis.com/v1/userinfo',
+          };
+
+          const request = new AuthSession.AuthRequest({
+            clientId,
+            scopes: ['openid', 'profile', 'email'],
+            responseType: AuthSession.ResponseType.IdToken,
+            redirectUri,
+            extraParams: {
+              nonce: hashedNonce,
+            },
+          });
+
+          const result = await request.promptAsync(discovery);
+
+          if (result.type !== 'success') {
+            if (result.type === 'cancel' || result.type === 'dismiss') {
+              return null; // Kullanıcı iptal etti
+            }
+            return 'Google ile giriş tamamlanamadı veya pencere kapatıldı.';
+          }
+
+          const idToken = result.params?.id_token;
+          if (!idToken) {
+            return 'Google kimlik belirteci (id_token) alınamadı.';
+          }
+
+          const { data, error } = await supabase.auth.signInWithIdToken({
+            provider: 'google',
+            token: idToken,
+            nonce: rawNonce,
+          });
+
+          if (error) {
+            return error.message;
+          }
+
+          if (data.user) {
+            setUserId(data.user.id);
+            setEmail(data.user.email ?? null);
+            setName(extractName(data.user));
+          }
+
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Google ile giriş sırasında bir hata oluştu.';
+        }
+      },
       async signOut() {
         if (isSupabaseConfigured) {
           await supabase.auth.signOut();
-        } else {
-          await AsyncStorage.removeItem(LOCAL_SESSION_KEY);
-          setUserId(null);
-          setEmail(null);
-          setName(null);
         }
+        await AsyncStorage.removeItem('tekstil:last-sync');
+        await AsyncStorage.removeItem(LOCAL_SESSION_KEY);
+        const { useDataStore } = await import('./store');
+        const { emptyDB } = await import('./persist');
+        useDataStore.getState().replaceDB(emptyDB());
+        useDataStore.getState().setOrg(null);
+        useDataStore.getState().setUserId('anon');
+        setUserId(null);
+        setEmail(null);
+        setName(null);
       },
       async resetPassword(mail) {
         if (isSupabaseConfigured) {
@@ -157,7 +251,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return 'Cihaz modunda şifre sıfırlama yok. Parolanızı unuttuysanız uygulama verisini temizleyin.';
       },
     }),
-    [userId, email, name, ready]
+    [userId, email, name, ready, isGoogleConfigured]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

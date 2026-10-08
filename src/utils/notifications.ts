@@ -61,12 +61,13 @@ export async function requestNotificationPermission(): Promise<boolean> {
 export async function scheduleAttendanceReminder(timeHHmm: string | null) {
   if (!Notifications || Platform.OS === 'web') return false;
   try {
-    await Notifications.cancelAllScheduledNotificationsAsync();
+    await Notifications.cancelScheduledNotificationAsync('attendance-reminder').catch(() => undefined);
     if (!timeHHmm) return false;
     const granted = await requestNotificationPermission();
     if (!granted) return false;
     const [h, m] = timeHHmm.split(':').map(Number);
     await Notifications.scheduleNotificationAsync({
+      identifier: 'attendance-reminder',
       content: {
         title: 'Günün yoklaması hazır 📋',
         body: 'Bugün kim gelmedi? Birkaç dokunuşla puantajı tamamlayın.',
@@ -75,6 +76,38 @@ export async function scheduleAttendanceReminder(timeHHmm: string | null) {
         type: Notifications.SchedulableTriggerInputTypes.DAILY,
         hour: h,
         minute: m,
+      },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Haftalık JSON yedeği alma hatırlatması (PLAN 6.9, Görev B3).
+ * Her Cuma 17:00'de kullanıcıyı JSON yedeğini indirip cihaz dışına saklamaya teşvik eder.
+ * Yerel snapshot'lar cihaz kaybında yok olacağı için harici yedekleme esastır.
+ */
+export async function scheduleWeeklyBackupReminder(enabled: boolean) {
+  if (!Notifications || Platform.OS === 'web') return false;
+  try {
+    await Notifications.cancelScheduledNotificationAsync('weekly-backup-reminder').catch(() => undefined);
+    if (!enabled) return true;
+    const granted = await requestNotificationPermission();
+    if (!granted) return false;
+    await Notifications.scheduleNotificationAsync({
+      identifier: 'weekly-backup-reminder',
+      content: {
+        title: 'Haftalık Veri Yedeği Hatırlatması 💾',
+        body: 'Telefon kaybı veya arızasına karşı Ayarlar > Hesap üzerinden JSON yedeği alıp cihaz dışına kaydedin.',
+        data: { type: 'weekly_backup' },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+        weekday: 6, // Cuma
+        hour: 17,
+        minute: 0,
       },
     });
     return true;

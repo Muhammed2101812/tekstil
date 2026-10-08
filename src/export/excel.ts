@@ -3,6 +3,8 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import * as XLSX from 'xlsx';
 import { PayrollItem, Employee } from '../types';
+import { useDataStore } from '../data/store';
+import { DataDB, emptyDB } from '../data/persist';
 
 /**
  * Excel üretimi (PLAN 3.2): SheetJS (xlsx) + paylama.
@@ -162,16 +164,15 @@ export async function shareFullBackupJson(db: import('../data/persist').DataDB) 
 /** JSON yedeği geri yükle (PLAN 8: "JSON yedek boş hesaba geri yüklenebiliyor") */
 export async function restoreFromJsonText(text: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    const parsed = JSON.parse(text) as { version?: number; db?: import('../data/persist').DataDB };
-    if (!parsed.db) return { ok: false, error: 'Geçersiz yedek dosyası' };
-    const store = await import('../data/store');
-    const { emptyDB } = await import('../data/persist');
-    const merged = { ...emptyDB(), ...parsed.db };
+    const parsed = JSON.parse(text) as { version?: number; db?: DataDB } & DataDB;
+    const dbSource = parsed.db ? parsed.db : parsed;
+    if (!dbSource || typeof dbSource !== 'object') return { ok: false, error: 'Geçersiz yedek dosyası' };
+    const merged = { ...emptyDB(), ...dbSource };
     // temel bütünlük kontrolü
     if (!Array.isArray(merged.employees) || !Array.isArray(merged.attendance)) {
       return { ok: false, error: 'Yedek eksik tablo içeriyor' };
     }
-    store.useDataStore.getState().replaceDB(merged);
+    useDataStore.getState().replaceDB(merged);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'Yedek okunamadı' };

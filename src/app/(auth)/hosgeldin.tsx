@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -15,7 +15,7 @@ import {
   Wallet,
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AtelierLogo, Button } from '../../ui';
+import { AtelierLogo, Button, GoogleIcon, useToast } from '../../ui';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useAuth } from '../../data/auth';
 import { hapticLight } from '../../utils/haptics';
@@ -42,7 +42,18 @@ const FEATURES = [
 export default function Hosgeldin() {
   const { c, type } = useTheme();
   const insets = useSafeAreaInsets();
-  const { mode } = useAuth();
+  const { mode, signInWithGoogle } = useAuth();
+  const { showToast } = useToast();
+  const [googleBusy, setGoogleBusy] = useState(false);
+
+  const onGooglePress = async () => {
+    setGoogleBusy(true);
+    const err = await signInWithGoogle();
+    setGoogleBusy(false);
+    if (err) {
+      showToast({ message: err, tone: 'warning' });
+    }
+  };
 
   const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
   const topInset = Math.max(insets.top, statusBarHeight, Platform.OS === 'ios' ? 44 : 28);
@@ -91,6 +102,16 @@ export default function Hosgeldin() {
 
       {/* Giriş seçenekleri */}
       <View style={styles.actions}>
+        {mode === 'supabase' ? (
+          <Button
+            label={googleBusy ? 'Giriş yapılıyor…' : 'Google ile devam et'}
+            variant="secondary"
+            icon={<GoogleIcon size={18} />}
+            onPress={onGooglePress}
+            loading={googleBusy}
+            disabled={googleBusy}
+          />
+        ) : null}
         <Button
           label="Hesap Oluştur"
           onPress={() => {

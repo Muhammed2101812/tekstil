@@ -19,3 +19,4 @@ export { Skeleton, EmptyState, ProgressBar, OfflineBanner } from './Feedback';
 export { IconButton } from './IconButton';
 export { StatCard, StatGrid } from './StatCard';
 export { AtelierLogo } from './AtelierLogo';
+export { GoogleIcon } from './GoogleIcon';

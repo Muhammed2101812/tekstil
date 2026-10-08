@@ -39,6 +39,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       }
       const q = await (useDataStore.getState().persist?.loadQueue() ?? Promise.resolve([]));
       if (q.length) useSyncQueue.getState().setPending(q);
+      const { checkAndTriggerAutoSnapshot } = await import('./snapshot');
+      await checkAndTriggerAutoSnapshot().catch(() => undefined);
     })();
   }, [auth.ready, auth.userId]);
 
@@ -69,7 +71,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     let busy = false;
     const attemptSync = async () => {
-      if (busy || !useDataStore.getState().userId) return;
+      const currentUserId = useDataStore.getState().userId;
+      if (busy || !currentUserId || currentUserId === 'anon') return;
       busy = true;
       const { pending, setPending, setFlushing, online } = useSyncQueue.getState();
       if (!online) {
@@ -88,12 +91,20 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           }
         }
         await pullAll();
+        const st = useDataStore.getState();
+        if (st.userId && !st.orgId) {
+          const org = st.db.org_members.find((m) => m.user_id === st.userId);
+          if (org) st.setOrg(org.org_id);
+        }
       } catch {
         setFlushing(false, 'Bağlantı yok');
       } finally {
         busy = false;
       }
     };
+
+    // Giriş yapıldığında veya online olunduğunda hemen senkronize et
+    attemptSync();
 
     const net = NetInfo.addEventListener((state) => {
       useSyncQueue.getState().setOnline(!!state.isConnected);
@@ -109,7 +120,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       clearInterval(interval);
       appState.remove();
     };
-  }, []);
+  }, [auth.userId]);
 
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }

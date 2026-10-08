@@ -58,7 +58,8 @@
         {
           "faceIDPermission": "Uygulama kilidi için Face ID kullanılır."
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "extra": {
       "eas": {
