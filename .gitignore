@@ -43,3 +43,6 @@ yarn-error.*
 
 # supabase
 supabase/.temp/
+
+# google oauth secrets
+client_secret*.json
