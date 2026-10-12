@@ -19,7 +19,7 @@
       "package": "com.tekstil.takip",
       "versionCode": 1,
       "adaptiveIcon": {
-        "backgroundColor": "#3B5BDB",
+        "backgroundColor": "#2D54CD",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -28,7 +28,8 @@
       "permissions": [
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
-        "android.permission.VIBRATE"
+        "android.permission.VIBRATE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -64,8 +65,10 @@
     ],
     "extra": {
       "eas": {
-        "projectId": ""
-      }
-    }
+        "projectId": "247794cf-d62d-4bf6-b474-25b7510deb34"
+      },
+      "router": {}
+    },
+    "owner": "mzsoft"
   }
 }
