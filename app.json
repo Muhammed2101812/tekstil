@@ -17,6 +17,7 @@
     },
     "android": {
       "package": "com.tekstil.takip",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#3B5BDB",
         "foregroundImage": "./assets/android-icon-foreground.png",
