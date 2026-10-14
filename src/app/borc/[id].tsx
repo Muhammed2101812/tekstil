@@ -125,7 +125,7 @@ export default function BorcDetay() {
         title="Elden Ödeme"
         message={`${employee.full_name} kişisinden alınan tutarı girin.`}
         confirmLabel="Ödemeyi Kaydet"
-        onConfirm={() => {
+        onConfirm={async () => {
           if (eldenAmount <= 0) {
             showToast({ message: 'Önce bir tutar girin', tone: 'warning' });
             return;
@@ -134,14 +134,18 @@ export default function BorcDetay() {
             showToast({ message: `Tutar kalan borcu aşıyor (${formatMoney(remaining)})`, tone: 'warning' });
             return;
           }
-          recordDebtPayment({
-            debt_id: debt.id,
-            employee_id: employee.id,
-            amount: eldenAmount,
-            method: 'elden',
-          });
-          showToast({ message: `${formatMoney(eldenAmount)} elden tahsil edildi`, tone: 'success' });
-          setEldenAmount(0);
+          try {
+            await recordDebtPayment({
+              debt_id: debt.id,
+              employee_id: employee.id,
+              amount: eldenAmount,
+              method: 'elden',
+            });
+            showToast({ message: `${formatMoney(eldenAmount)} elden tahsil edildi`, tone: 'success' });
+            setEldenAmount(0);
+          } catch (e) {
+            showToast({ message: e instanceof Error ? e.message : 'Ödeme kaydedilemedi', tone: 'warning' });
+          }
         }}
       >
         <MoneyField
@@ -158,9 +162,13 @@ export default function BorcDetay() {
         title="Taksit Sayısını Değiştir"
         message="Yeni taksit planı kalan borca uygulanır."
         confirmLabel="Uygula"
-        onConfirm={() => {
-          updateDebtInstallments(debt.id, taksitCount);
-          showToast({ message: `${taksitCount} taksit olarak güncellendi`, tone: 'success' });
+        onConfirm={async () => {
+          try {
+            await updateDebtInstallments(debt.id, taksitCount);
+            showToast({ message: `${taksitCount} taksit olarak güncellendi`, tone: 'success' });
+          } catch (e) {
+            showToast({ message: e instanceof Error ? e.message : 'Güncellenemedi', tone: 'warning' });
+          }
         }}
       >
         <SegmentedControl
@@ -177,8 +185,8 @@ export default function BorcDetay() {
         message="Bu borca ait ödeme yok. Silmek geri alınamaz."
         confirmLabel="Sil"
         destructive
-        onConfirm={() => {
-          const res = deleteDebtIfUnpaid(debt.id);
+        onConfirm={async () => {
+          const res = await deleteDebtIfUnpaid(debt.id);
           if (res.ok) showToast({ message: 'Borç silindi', tone: 'success' });
           else showToast({ message: res.reason ?? 'Silinemedi', tone: 'warning' });
         }}

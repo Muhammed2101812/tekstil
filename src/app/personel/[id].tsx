@@ -365,10 +365,14 @@ export default function CalisanDetay() {
         <Button
           label="Çıkışı Kaydet"
           variant="danger"
-          onPress={() => {
-            deactivateEmployee(employee.id, exitDate);
-            showToast({ message: 'Çıkış kaydedildi', tone: 'success' });
-            setExitOpen(false);
+          onPress={async () => {
+            try {
+              await deactivateEmployee(employee.id, exitDate);
+              showToast({ message: 'Çıkış kaydedildi', tone: 'success' });
+              setExitOpen(false);
+            } catch (e) {
+              showToast({ message: e instanceof Error ? e.message : 'Çıkış kaydedilemedi', tone: 'warning' });
+            }
           }}
         />
       </BottomSheet>
@@ -377,8 +381,9 @@ export default function CalisanDetay() {
         visible={leaveOpen}
         onClose={() => setLeaveOpen(false)}
         onApply={(days, reason) => {
-          adjustLeave({ employee_id: employee.id, days, reason });
-          showToast({ message: `${days > 0 ? '+' : ''}${days} gün izin bakiyesi`, tone: 'success' });
+          adjustLeave({ employee_id: employee.id, days, reason })
+            .then(() => showToast({ message: `${days > 0 ? '+' : ''}${days} gün izin bakiyesi`, tone: 'success' }))
+            .catch((e) => showToast({ message: e instanceof Error ? e.message : 'İzin kaydedilemedi', tone: 'warning' }));
         }}
       />
     </Screen>

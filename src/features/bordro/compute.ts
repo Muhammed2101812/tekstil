@@ -6,7 +6,7 @@ import {
 import { calculateEmployeePayroll, PayrollAdjustments } from '../../domain/payroll';
 import { daysInMonth } from '../../domain/schedule';
 import { formatMoneyShort } from '../../utils/format';
-import { DataDB } from '../../data/persist';
+import { DataDB } from '../../data/store';
 import { deterministicUuid } from '../../data/id';
 
 export interface MonthComputeInput {

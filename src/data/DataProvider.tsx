@@ -4,9 +4,8 @@ import NetInfo from '@react-native-community/netinfo';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useThemeStore } from '../state/settings';
 import { useAuth } from './auth';
-import { useDataStore, useSyncQueue } from './store';
-import { filePersist } from './persist';
-import { flushQueue, isSupabaseConfigured, pullAll } from './supabase';
+import { useDataStore, useSyncState } from './store';
+import { isSupabaseConfigured, pullAll } from './supabase';
 import { ensureHolidays } from './repo';
 
 const queryClient = new QueryClient({
@@ -14,10 +13,12 @@ const queryClient = new QueryClient({
 });
 
 /**
- * Veri sağlayıcı:
- * 1. Kalıcı dosyadan DB'yi yükler, kullanıcıya firma üyeliğini bağlar.
- * 2. Supabase modunda: ağ dinler, kuyruğu boşaltır (önce push, sonra pull),
- *    60 sn'de bir ve uygulama öne gelince yeniden dener (PLAN Bölüm 9).
+ * Veri sağlayıcı (tamamen online, agent.md):
+ * 1. Oturum açıldığında store'u kullanıcıya bağlar ve sunucudan çeker (pullAll).
+ * 2. Uygulama öne gelince, ağ dönünce ve 60 sn'de bir yeniden çeker.
+ * 3. Firma bağlandıktan sonra eksik yıl tatillerini sunucuda tohumlar.
+ * Offline kuyruk YOKTUR: yazmalar remote-first (repo.ts) olduğundan yalnızca
+ * okuma tazeliği burada yönetilir.
  */
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
@@ -32,15 +33,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (!auth.ready || initialized.current) return;
     initialized.current = true;
     (async () => {
-      await useDataStore.getState().init(filePersist(), auth.userId ?? 'anon', null);
+      useDataStore.getState().init(auth.userId ?? 'anon', null);
       if (auth.userId) {
         const org = useDataStore.getState().db.org_members.find((m) => m.user_id === auth.userId);
         if (org) useDataStore.getState().setOrg(org.org_id);
       }
-      const q = await (useDataStore.getState().persist?.loadQueue() ?? Promise.resolve([]));
-      if (q.length) useSyncQueue.getState().setPending(q);
-      const { checkAndTriggerAutoSnapshot } = await import('./snapshot');
-      await checkAndTriggerAutoSnapshot().catch(() => undefined);
     })();
   }, [auth.ready, auth.userId]);
 
@@ -65,49 +62,58 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     ensureHolidays(orgId, thisYear + 1).catch(() => undefined);
   }, [loaded, orgId]);
 
-  // Senkron motoru
+  // Senkron motoru: pullAll — ilk girişte, öne gelince, ağ dönünce, 60 sn'de bir
   useEffect(() => {
     if (!isSupabaseConfigured) return;
+
+    // Kullanıcı değişti (giriş/çıkış) → ilk senkron durumunu sıfırla.
+    // Böylece owner'ın oluşturduğu kullanıcı ilk girişte, sunucudan üyeliği
+    // çekilmeden /kurulum'a yönlendirilip yanlışlıkla ikinci firma kuramaz.
+    const sync = useSyncState.getState();
+    sync.setFirstSyncDone(false);
+    sync.setInitialSyncError(false);
 
     let busy = false;
     const attemptSync = async () => {
       const currentUserId = useDataStore.getState().userId;
       if (busy || !currentUserId || currentUserId === 'anon') return;
-      busy = true;
-      const { pending, setPending, setFlushing, online } = useSyncQueue.getState();
+      const { online } = useSyncState.getState();
       if (!online) {
-        busy = false;
+        if (!useSyncState.getState().firstSyncDone) useSyncState.getState().setInitialSyncError(true);
         return;
       }
-      setFlushing(true);
+      busy = true;
       try {
-        if (pending.length > 0) {
-          const { ok, failed } = await flushQueue(pending);
-          if (ok.length) setPending(pending.filter((p) => !ok.includes(p)));
-          if (failed.length) {
-            setFlushing(false, 'Gönderilemeyen kayıtlar var, tekrar denenecek');
-          } else {
-            setFlushing(false, null);
-          }
+        const res = await pullAll();
+        if (res.ok) {
+          useSyncState.getState().setFirstSyncDone(true);
+          useSyncState.getState().setInitialSyncError(false);
+          useSyncState.getState().setLastError(null);
+        } else {
+          useSyncState.getState().setLastError('Veriler güncellenemedi');
+          if (!useSyncState.getState().firstSyncDone) useSyncState.getState().setInitialSyncError(true);
         }
-        await pullAll();
         const st = useDataStore.getState();
         if (st.userId && !st.orgId) {
           const org = st.db.org_members.find((m) => m.user_id === st.userId);
           if (org) st.setOrg(org.org_id);
         }
       } catch {
-        setFlushing(false, 'Bağlantı yok');
+        useSyncState.getState().setLastError('Bağlantı yok');
+        if (!useSyncState.getState().firstSyncDone) useSyncState.getState().setInitialSyncError(true);
       } finally {
         busy = false;
       }
     };
 
+    // Hata ekranındaki "Tekrar Dene" buraya bağlanır
+    useSyncState.getState().setTriggerSync(() => attemptSync());
+
     // Giriş yapıldığında veya online olunduğunda hemen senkronize et
     attemptSync();
 
     const net = NetInfo.addEventListener((state) => {
-      useSyncQueue.getState().setOnline(!!state.isConnected);
+      useSyncState.getState().setOnline(!!state.isConnected);
       if (state.isConnected) attemptSync();
     });
     const interval = setInterval(attemptSync, 60_000);
@@ -116,6 +122,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => {
+      useSyncState.getState().setTriggerSync(null);
       net();
       clearInterval(interval);
       appState.remove();

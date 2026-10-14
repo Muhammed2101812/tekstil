@@ -14,7 +14,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as XLSX from 'xlsx';
 import { File } from 'expo-file-system';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Button, Card, Chip, MoneyField, SegmentedControl, TextField } from '../../ui';
+import { Button, Card, Chip, MoneyField, SegmentedControl, TextField, TimeField } from '../../ui';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useAuth } from '../../data/auth';
 import { addDepartment, addEmployee, createOrganization, saveSchedule } from '../../data/repo';
@@ -62,6 +62,7 @@ export default function Kurulum() {
   const [endTime, setEndTime] = useState('18:30');
   const [breakStart, setBreakStart] = useState('12:30');
   const [breakEnd, setBreakEnd] = useState('13:30');
+  const [hasBreak, setHasBreak] = useState(true);
   const [selectedDeps, setSelectedDeps] = useState<string[]>(['Kesim', 'Dikim']);
   const [people, setPeople] = useState<{ name: string; salary: string }[]>([{ name: '', salary: '' }]);
   const [busy, setBusy] = useState(false);
@@ -69,11 +70,12 @@ export default function Kurulum() {
   const [importInfo, setImportInfo] = useState<string | null>(null);
 
   const breakMinutes = useMemo(() => {
+    if (!hasBreak) return 0;
     const s = timeToMin(breakStart);
     const e = timeToMin(breakEnd);
-    if (Number.isNaN(s) || Number.isNaN(e)) return 0;
-    return Math.max(0, e - s);
-  }, [breakStart, breakEnd]);
+    if (Number.isNaN(s) || Number.isNaN(e) || e <= s) return 0;
+    return e - s;
+  }, [hasBreak, breakStart, breakEnd]);
 
   const timesValid = useMemo(() => {
     const s = timeToMin(startTime);
@@ -96,9 +98,34 @@ export default function Kurulum() {
     setEndTime(t.end);
     setBreakStart(t.breakStart);
     setBreakEnd(t.breakEnd);
+    setHasBreak(true);
+  };
+
+  const onPickBreakStart = (newStart: string) => {
+    setBreakStart(newStart);
+    setHasBreak(true);
+    const s = timeToMin(newStart);
+    const curDur = breakMinutes > 0 ? breakMinutes : 60;
+    if (!Number.isNaN(s)) {
+      setBreakEnd(minToTime(s + curDur));
+    }
+  };
+
+  const onPickBreakEnd = (newEnd: string) => {
+    setBreakEnd(newEnd);
+    const s = timeToMin(breakStart);
+    const e = timeToMin(newEnd);
+    if (!Number.isNaN(s) && !Number.isNaN(e) && e > s) {
+      setHasBreak(true);
+    }
   };
 
   const setBreakDuration = (m: number) => {
+    if (m === 0) {
+      setHasBreak(false);
+      return;
+    }
+    setHasBreak(true);
     const s = Number.isNaN(timeToMin(breakStart)) ? 12 * 60 + 30 : timeToMin(breakStart);
     setBreakStart(minToTime(s));
     setBreakEnd(minToTime(s + m));
@@ -152,7 +179,9 @@ export default function Kurulum() {
         end: breakEnd || '13:30',
         paid: false,
       };
-      const schedule = defaultScheduleDays(org).map((d) => {
+      const existingSchedule = useDataStore.getState().db.schedule_days.filter((d) => d.org_id === org);
+      const baseDays = existingSchedule.length === 7 ? existingSchedule : defaultScheduleDays(org);
+      const schedule = baseDays.map((d) => {
         if (!d.is_workday) return d;
         return {
           ...d,
@@ -161,10 +190,10 @@ export default function Kurulum() {
           breaks: breakMinutes > 0 ? [brk] : [],
         };
       });
-      saveSchedule(schedule);
+      await saveSchedule(schedule);
       for (const name of selectedDeps) {
         const preset = DEPARTMENT_PRESETS.find((p) => p.name === name);
-        addDepartment(name, preset?.color ?? '#3B5BDB');
+        await addDepartment(name, preset?.color ?? '#3B5BDB');
       }
       if (!skipPeople) {
         for (const p of people) {
@@ -328,38 +357,34 @@ export default function Kurulum() {
                 <View style={{ marginTop: spacing.md }}>
                   <View style={{ flexDirection: 'row', gap: spacing.md }}>
                     <View style={{ flex: 1 }}>
-                      <TextField
+                      <TimeField
                         label="Mesai Başlangıç"
                         value={startTime}
-                        onChangeText={setStartTime}
-                        placeholder="08:30"
+                        onPick={setStartTime}
                       />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <TextField
+                      <TimeField
                         label="Mesai Bitiş"
                         value={endTime}
-                        onChangeText={setEndTime}
-                        placeholder="18:30"
+                        onPick={setEndTime}
                       />
                     </View>
                   </View>
-                  {breakMinutes > 0 ? (
-                    <View style={{ flexDirection: 'row', gap: spacing.md }}>
+                  {hasBreak ? (
+                    <View style={{ flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm }}>
                       <View style={{ flex: 1 }}>
-                        <TextField
+                        <TimeField
                           label="Mola Başlangıç"
                           value={breakStart}
-                          onChangeText={setBreakStart}
-                          placeholder="12:30"
+                          onPick={onPickBreakStart}
                         />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <TextField
+                        <TimeField
                           label="Mola Bitiş"
                           value={breakEnd}
-                          onChangeText={setBreakEnd}
-                          placeholder="13:30"
+                          onPick={onPickBreakEnd}
                         />
                       </View>
                     </View>
@@ -375,7 +400,7 @@ export default function Kurulum() {
                   <Chip
                     key={m}
                     label={m === 0 ? 'Mola yok' : `${m} dk`}
-                    selected={breakMinutes === m}
+                    selected={m === 0 ? !hasBreak : hasBreak && breakMinutes === m}
                     onPress={() => setBreakDuration(m)}
                   />
                 ))}

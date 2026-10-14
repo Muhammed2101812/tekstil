@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { DEFAULT_SETTINGS, OrgSettings, AttendanceRecord, Employee, EmployeeSalary } from '../types';
-import { useDataStore, useSyncQueue } from './store';
+import { useDataStore, useSyncState } from './store';
 import { useAuth } from './auth';
 
 /**
@@ -158,8 +158,24 @@ export function useSalaryPayments(payrollId: string | undefined) {
   }, [items, payments, payrollId]);
 }
 
-export function useSyncStatus(): { pending: number; online: boolean } {
-  const pending = useSyncQueue((s) => s.pending.length);
-  const online = useSyncQueue((s) => s.online);
-  return { pending, online };
+export function useSyncStatus(): { online: boolean } {
+  const online = useSyncState((s) => s.online);
+  return { online };
 }
+
+export function useProductionBatches() {
+  const orgId = useOrgId();
+  const batches = useDataStore((s) => s.db.production_batches);
+  return useMemo(
+    () =>
+      (batches ?? [])
+        .filter((b) => b.org_id === orgId)
+        .sort((a, b) => {
+          const d = b.date.localeCompare(a.date);
+          if (d !== 0) return d;
+          return (b.created_at ?? '').localeCompare(a.created_at ?? '');
+        }),
+    [batches, orgId]
+  );
+}
+

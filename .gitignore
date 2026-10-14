@@ -48,3 +48,11 @@ supabase/.temp/
 
 # google oauth secrets
 client_secret*.json
+*.aab
+
+# temporary & ide
+.zcode/
+dist_web/
+*.bak
+test_*.png
+raw_screen_*.png

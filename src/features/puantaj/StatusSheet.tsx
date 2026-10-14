@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { BottomSheet, Button, TimeSheet , STATUS_META , useToast } from '../../ui';
+import { BottomSheet, Button, ConfirmSheet, TimeSheet , STATUS_META , useToast } from '../../ui';
 import { useTheme } from '../../theme/ThemeProvider';
 import { AttendanceRecord, AttendanceStatus, ATTENDANCE_STATUSES } from '../../types';
 import { markAttendance, addOvertime, clearAttendance } from '../../data/repo';
@@ -36,6 +36,7 @@ export function StatusSheet({
   const { c, spacing, radius, type } = useTheme();
   const { showToast } = useToast();
   const [timeSheet, setTimeSheet] = useState<null | { mode: 'gec' | 'erken' }>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
   const t = useTheme();
 
   const apply = async (status: AttendanceStatus, extra?: Partial<AttendanceRecord>) => {
@@ -167,21 +168,31 @@ export function StatusSheet({
                 label="Kaydı Sil"
                 variant="ghost"
                 size="md"
-                onPress={async () => {
-                  try {
-                    await clearAttendance(day, employee.id);
-                    showToast({ message: 'Kayıt silindi, "Geldi" sayılacak', tone: 'success' });
-                  } catch (e) {
-                    showToast({ message: e instanceof Error ? e.message : 'Kayıt silinemedi', tone: 'warning' });
-                  } finally {
-                    onClose();
-                  }
-                }}
+                onPress={() => setDeleteConfirm(true)}
               />
             </View>
           ) : null}
         </View>
       </BottomSheet>
+
+      <ConfirmSheet
+        visible={deleteConfirm}
+        onClose={() => setDeleteConfirm(false)}
+        title="Yoklama Kaydını Sil"
+        message={`${employee.full_name} — ${day} kaydı silinecek ve "Geldi" sayılacak. Devam edilsin mi?`}
+        confirmLabel="Sil"
+        destructive
+        onConfirm={async () => {
+          try {
+            await clearAttendance(day, employee.id);
+            showToast({ message: 'Kayıt silindi, "Geldi" sayılacak', tone: 'success' });
+          } catch (e) {
+            showToast({ message: e instanceof Error ? e.message : 'Kayıt silinemedi', tone: 'warning' });
+          } finally {
+            onClose();
+          }
+        }}
+      />
 
       <TimeSheet
         visible={timeSheet !== null}

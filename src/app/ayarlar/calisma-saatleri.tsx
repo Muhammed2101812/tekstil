@@ -20,10 +20,6 @@ export default function AyarCalismaSaatleri() {
   const weekly = useMemo(() => weeklyPlannedHours(schedule), [schedule]);
   const monthly = useMemo(() => averageMonthlyHours(schedule), [schedule]);
 
-  const save = (day: ScheduleDay) => {
-    saveScheduleDay(day);
-  };
-
   /** Canlı örnek (PLAN 4.3): mola değişince "1 gün gelmezse X kesilir" güncellenir */
   const ornekSaatlik = 30000 / (monthly > 0 ? monthly : 195);
   const stdGun = schedule.find((d) => d.is_workday);
@@ -92,9 +88,10 @@ export default function AyarCalismaSaatleri() {
           day={editDay}
           onClose={() => setEditDay(null)}
           onSaved={(d) => {
-            save(d);
             setEditDay(null);
-            showToast({ message: `${gunler[d.weekday - 1]} güncellendi`, tone: 'success' });
+            saveScheduleDay(d)
+              .then(() => showToast({ message: `${gunler[d.weekday - 1]} güncellendi`, tone: 'success' }))
+              .catch((e) => showToast({ message: e instanceof Error ? e.message : 'Kaydedilemedi', tone: 'warning' }));
           }}
         />
       ) : null}

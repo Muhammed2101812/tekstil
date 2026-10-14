@@ -43,7 +43,7 @@ export default function EkCalisma() {
   const hours = netHoursBetween(start, end, schedule.find((s) => s.weekday === weekday)?.breaks ?? []);
   const calledCount = scope === 'tumu' ? employees.length : scope === 'departman' ? employees.filter((e) => e.department_id === departmentId).length : pickedEmployees.length;
 
-  const save = () => {
+  const save = async () => {
     const check = validateEkCalismaDate(dayPlan);
     if (!check.valid) {
       showToast({ message: check.error!, tone: 'warning' });
@@ -76,12 +76,16 @@ export default function EkCalisma() {
       employee_ids: scope === 'kisiler' ? pickedEmployees : [],
       updated_at: new Date().toISOString(),
     };
-    saveCalendarEvent(event);
-    hapticSuccess();
-    showToast({
-      message: `${formatTarih(date)} için ek çalışma tanımlandı (×${multiplier.toString().replace('.', ',')} mesai)`,
-      tone: 'success',
-    });
+    try {
+      await saveCalendarEvent(event);
+      hapticSuccess();
+      showToast({
+        message: `${formatTarih(date)} için ek çalışma tanımlandı (×${multiplier.toString().replace('.', ',')} mesai)`,
+        tone: 'success',
+      });
+    } catch (e) {
+      showToast({ message: e instanceof Error ? e.message : 'Ek çalışma kaydedilemedi', tone: 'warning' });
+    }
   };
 
   return (

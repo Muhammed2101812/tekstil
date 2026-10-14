@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   AttendanceDay,
@@ -8,27 +9,26 @@ import {
   Department,
   Employee,
   Organization,
-  OrgInvite,
   OvertimeKind,
   OvertimeRecord,
   Payroll,
   PayrollItem,
+  ProductionBatch,
   SalaryPaymentMethod,
   ScheduleDay,
-  DEFAULT_SETTINGS,
   DEPARTMENT_PRESETS,
-  defaultScheduleDays,
 } from '../types';
 import { TURKISH_HOLIDAYS } from '../domain/holidays-tr';
 import { todayISO } from '../domain/schedule';
-import { useDataStore, useSyncQueue } from './store';
+import { useDataStore, useSyncState, emptyDB } from './store';
 import { deterministicUuid, uuid } from './id';
-import { isSupabaseConfigured, supabase } from './supabase';
+import { pullAll, remoteDelete, remoteUpsert, supabase } from './supabase';
 
 /**
- * Yüksek seviye işlemler. Her işlem önce yerel DB'ye yazar (anında arayüz
- * güncellenir), sonra senkron kuyruğuna ekler. Supabase modunda bordro
- * kesinleştirme gibi atomik işlemler RPC ile yapılır (çevrimiçi gerekir).
+ * Yüksek seviye işlemler — tamamen online (agent.md yazma kuralı):
+ * Her işlem ÖNCE `await` ile Supabase'e gider (remoteUpsert/remoteDelete/RPC);
+ * işlem başarılı olursa bellek içi store güncellenir. Başarısızlıkta exception
+ * fırlatılır, store'a dokunulmaz ve arayüz hatayı kullanıcıya gösterir.
  */
 
 function nowISO() {
@@ -59,56 +59,29 @@ async function overtimeEventId(eventId: string, employeeId: string) {
 
 export async function createOrganization(name: string, logoUrl: string | null): Promise<string> {
   const { userId } = useDataStore.getState();
-  if (!userId) throw new Error('Oturum yok');
+  if (!userId || userId === 'anon') throw new Error('Oturum yok');
 
-  if (isSupabaseConfigured) {
-    const { data, error } = await supabase.rpc('create_organization', { p_name: name, p_logo_url: logoUrl });
-    if (error) throw new Error(error.message);
-    const orgId = data as string;
-    // RPC takvim/tatilleri sunucuda kurdu; çekip aynala
-    const { data: schedule } = await supabase.from('schedule_days').select('*').eq('org_id', orgId);
-    const { data: events } = await supabase.from('calendar_events').select('*').eq('org_id', orgId);
-    const { data: members } = await supabase.from('org_members').select('*').eq('org_id', orgId);
-    const { data: orgs } = await supabase.from('organizations').select('*').eq('id', orgId);
-    const st = useDataStore.getState();
-    if (orgs?.[0]) st.upsert('organizations', orgs[0] as Organization, false);
-    if (members) st.upsert('org_members', members as never, false);
-    if (schedule) st.upsert('schedule_days', schedule as never, false);
-    if (events) st.upsert('calendar_events', events as never, false);
-    useDataStore.getState().setOrg(orgId);
-    return orgId;
-  }
-
-  const orgId = uuid();
-  const org: Organization = {
-    id: orgId,
-    name,
-    logo_url: logoUrl,
-    settings: { ...DEFAULT_SETTINGS },
-    created_at: nowISO(),
-    updated_at: nowISO(),
-  };
+  const { data, error } = await supabase.rpc('create_organization', { p_name: name, p_logo_url: logoUrl });
+  if (error) throw new Error(error.message);
+  const orgId = data as string;
+  // RPC takvim/tatilleri sunucuda kurdu; çekip aynala
+  const { data: schedule } = await supabase.from('schedule_days').select('*').eq('org_id', orgId);
+  const { data: events } = await supabase.from('calendar_events').select('*').eq('org_id', orgId);
+  const { data: members } = await supabase.from('org_members').select('*').eq('org_id', orgId);
+  const { data: orgs } = await supabase.from('organizations').select('*').eq('id', orgId);
   const st = useDataStore.getState();
-  st.upsert('organizations', org, false);
-  st.upsert(
-    'org_members',
-    [{ id: uuid(), org_id: orgId, user_id: userId, role: 'owner', created_at: nowISO() }],
-    false
-  );
-  st.upsert('schedule_days', defaultScheduleDays(orgId), false);
-  const curY = new Date().getFullYear();
-  await ensureHolidays(orgId, curY);
-  await ensureHolidays(orgId, curY + 1);
-  await ensureHolidays(orgId, curY + 2);
+  if (orgs?.[0]) st.upsert('organizations', orgs[0] as Organization);
+  if (members) st.upsert('org_members', members as never);
+  if (schedule) st.upsert('schedule_days', schedule as never);
+  if (events) st.upsert('calendar_events', events as never);
   useDataStore.getState().setOrg(orgId);
   return orgId;
 }
 
 /**
- * Yıl devrinde tatil yeniden tohumlama (M3):
- * Belirtilen organizasyon için o yıla ait hiç resmî tatil / yarım gün kaydı yoksa
- * holidays-tr tablosundan deterministik UUID ile üretip upsert eder (enqueue=true).
- * Tekrar çağrılar idempotenttir. 2026–2030 dışındaki yıllar için sessizce 0 döner.
+ * Yıl devrinde tatil yeniden tohumlama (M3): sunucuda o yıla ait resmî tatil /
+ * yarım gün yoksa holidays-tr tablosundan deterministik UUID ile üretip
+ * Supabase'e yazar. Tekrar çağrılar idempotenttir. 2026–2030 dışı: 0 döner.
  */
 export async function ensureHolidays(orgId: string, yil: number): Promise<number> {
   if (yil < 2026 || yil > 2030) return 0;
@@ -143,13 +116,12 @@ export async function ensureHolidays(orgId: string, yil: number): Promise<number
     });
   }
 
-  st.upsert('calendar_events', events, true);
+  await remoteUpsert('calendar_events', events);
   return events.length;
 }
 
-export function addPresetDepartments(orgId: string) {
-  const st = useDataStore.getState();
-  st.upsert(
+export async function addPresetDepartments(orgId: string) {
+  await remoteUpsert(
     'departments',
     DEPARTMENT_PRESETS.map((d, i) => ({
       id: uuid(),
@@ -158,49 +130,50 @@ export function addPresetDepartments(orgId: string) {
       color: d.color,
       sort_order: i,
       updated_at: nowISO(),
-    })),
-    false
+    }))
   );
 }
 
-export function updateOrgSettings(patch: Partial<Organization['settings']>) {
-  const { db, orgId, upsert } = useDataStore.getState();
+export async function updateOrgSettings(patch: Partial<Organization['settings']>) {
+  const { db, orgId } = useDataStore.getState();
   const org = db.organizations.find((o) => o.id === orgId);
   if (!org) return;
-  upsert('organizations', touch({ ...org, settings: { ...org.settings, ...patch } }));
+  await remoteUpsert('organizations', touch({ ...org, settings: { ...org.settings, ...patch } }));
 }
 
-export function updateOrgProfile(name: string, logoUrl: string | null) {
-  const { db, orgId, upsert } = useDataStore.getState();
+export async function updateOrgProfile(name: string, logoUrl: string | null) {
+  const { db, orgId } = useDataStore.getState();
   const org = db.organizations.find((o) => o.id === orgId);
   if (!org) return;
-  upsert('organizations', touch({ ...org, name, logo_url: logoUrl }));
+  await remoteUpsert('organizations', touch({ ...org, name, logo_url: logoUrl }));
 }
 
 // ─── Departmanlar ─────────────────────────────────────────────────────────────
 
-export function saveDepartment(dep: Department) {
-  useDataStore.getState().upsert('departments', touch(dep));
+export async function saveDepartment(dep: Department) {
+  await remoteUpsert('departments', touch(dep));
 }
 
-export function addDepartment(name: string, color: string) {
-  useDataStore.getState().upsert('departments', {
+export async function addDepartment(name: string, color: string) {
+  const st = useDataStore.getState();
+  await remoteUpsert('departments', {
     id: uuid(),
-    org_id: useDataStore.getState().orgId!,
+    org_id: st.orgId!,
     name,
     color,
-    sort_order: useDataStore.getState().db.departments.length,
+    sort_order: st.db.departments.length,
     updated_at: nowISO(),
   });
 }
 
-export function removeDepartment(id: string) {
+export async function removeDepartment(id: string) {
   const st = useDataStore.getState();
-  // çalışanın departmanını boşa çıkar
-  for (const e of st.db.employees.filter((e) => e.department_id === id)) {
-    st.upsert('employees', touch({ ...e, department_id: null }));
+  // çalışanın departmanını boşa çıkar (önce sunucuda)
+  const affected = st.db.employees.filter((e) => e.department_id === id);
+  if (affected.length > 0) {
+    await remoteUpsert('employees', affected.map((e) => touch({ ...e, department_id: null })));
   }
-  st.remove('departments', [id]);
+  await remoteDelete('departments', [id]);
 }
 
 // ─── Çalışanlar ───────────────────────────────────────────────────────────────
@@ -221,7 +194,7 @@ export interface EmployeeInput {
 }
 
 export async function addEmployee(input: EmployeeInput): Promise<Employee> {
-  const { orgId, upsert } = useDataStore.getState();
+  const { orgId } = useDataStore.getState();
   const id = uuid();
   const employee: Employee = {
     id,
@@ -242,8 +215,8 @@ export async function addEmployee(input: EmployeeInput): Promise<Employee> {
     created_at: nowISO(),
     updated_at: nowISO(),
   };
-  upsert('employees', employee);
-  upsert('employee_salaries', {
+  await remoteUpsert('employees', employee);
+  await remoteUpsert('employee_salaries', {
     id: uuid(),
     org_id: orgId!,
     employee_id: id,
@@ -255,13 +228,13 @@ export async function addEmployee(input: EmployeeInput): Promise<Employee> {
   return employee;
 }
 
-export function updateEmployee(emp: Employee) {
-  useDataStore.getState().upsert('employees', touch(emp));
+export async function updateEmployee(emp: Employee) {
+  await remoteUpsert('employees', touch(emp));
 }
 
-export function addSalaryRaise(employeeId: string, amount: number, effectiveFrom: string, note: string | null) {
-  const { orgId, upsert } = useDataStore.getState();
-  upsert('employee_salaries', {
+export async function addSalaryRaise(employeeId: string, amount: number, effectiveFrom: string, note: string | null) {
+  const { orgId } = useDataStore.getState();
+  await remoteUpsert('employee_salaries', {
     id: uuid(),
     org_id: orgId!,
     employee_id: employeeId,
@@ -272,18 +245,18 @@ export function addSalaryRaise(employeeId: string, amount: number, effectiveFrom
   });
 }
 
-export function deactivateEmployee(employeeId: string, endDate: string) {
-  const { db, upsert } = useDataStore.getState();
+export async function deactivateEmployee(employeeId: string, endDate: string) {
+  const { db } = useDataStore.getState();
   const emp = db.employees.find((e) => e.id === employeeId);
   if (!emp) return;
-  upsert('employees', touch({ ...emp, end_date: endDate, active: false }));
+  await remoteUpsert('employees', touch({ ...emp, end_date: endDate, active: false }));
 }
 
-export function reactivateEmployee(employeeId: string) {
-  const { db, upsert } = useDataStore.getState();
+export async function reactivateEmployee(employeeId: string) {
+  const { db } = useDataStore.getState();
   const emp = db.employees.find((e) => e.id === employeeId);
   if (!emp) return;
-  upsert('employees', touch({ ...emp, end_date: null, active: true }));
+  await remoteUpsert('employees', touch({ ...emp, end_date: null, active: true }));
 }
 
 // ─── Puantaj ──────────────────────────────────────────────────────────────────
@@ -299,7 +272,7 @@ export interface AttendanceInput {
 }
 
 export async function markAttendance(day: string, inputs: AttendanceInput[], confirm = false) {
-  const { orgId, db, upsert } = useDataStore.getState();
+  const { orgId, db } = useDataStore.getState();
   const rows: AttendanceRecord[] = [];
   for (const input of inputs) {
     const existing = db.attendance.find((a) => a.employee_id === input.employee_id && a.day === day);
@@ -318,18 +291,18 @@ export async function markAttendance(day: string, inputs: AttendanceInput[], con
       updated_at: nowISO(),
     });
   }
-  upsert('attendance', rows);
+  await remoteUpsert('attendance', rows);
   if (confirm) await confirmAttendanceDay(day);
 }
 
 export async function clearAttendance(day: string, employeeId: string) {
-  const { db, remove } = useDataStore.getState();
+  const { db } = useDataStore.getState();
   const existing = db.attendance.find((a) => a.employee_id === employeeId && a.day === day);
-  if (existing) remove('attendance', [existing.id]);
+  if (existing) await remoteDelete('attendance', [existing.id]);
 }
 
 export async function confirmAttendanceDay(day: string) {
-  const { orgId, userId, db, upsert } = useDataStore.getState();
+  const { orgId, userId, db } = useDataStore.getState();
   const existing = db.attendance_days.find((d) => d.day === day);
   const row: AttendanceDay = {
     id: existing?.id ?? (await attendanceDayId(orgId!, day)),
@@ -338,7 +311,7 @@ export async function confirmAttendanceDay(day: string) {
     confirmed_by: userId!,
     confirmed_at: nowISO(),
   };
-  upsert('attendance_days', row);
+  await remoteUpsert('attendance_days', row);
 }
 
 // ─── Mesai ────────────────────────────────────────────────────────────────────
@@ -352,7 +325,7 @@ export async function addOvertime(input: {
   calendar_event_id?: string | null;
   note?: string | null;
 }) {
-  const { orgId, upsert } = useDataStore.getState();
+  const { orgId } = useDataStore.getState();
   const id = input.calendar_event_id
     ? await overtimeEventId(input.calendar_event_id, input.employee_id)
     : uuid();
@@ -369,34 +342,34 @@ export async function addOvertime(input: {
     client_ref: id,
     updated_at: nowISO(),
   };
-  upsert('overtime', rec);
+  await remoteUpsert('overtime', rec);
 }
 
-export function removeOvertime(id: string) {
-  useDataStore.getState().remove('overtime', [id]);
+export async function removeOvertime(id: string) {
+  await remoteDelete('overtime', [id]);
 }
 
 // ─── Takvim olayları ──────────────────────────────────────────────────────────
 
-export function saveCalendarEvent(event: CalendarEvent) {
-  useDataStore.getState().upsert('calendar_events', touch(event));
+export async function saveCalendarEvent(event: CalendarEvent) {
+  await remoteUpsert('calendar_events', touch(event));
 }
 
-export function removeCalendarEvent(id: string) {
-  useDataStore.getState().remove('calendar_events', [id]);
+export async function removeCalendarEvent(id: string) {
+  await remoteDelete('calendar_events', [id]);
 }
 
-export function saveScheduleDay(day: ScheduleDay) {
-  useDataStore.getState().upsert('schedule_days', touch(day));
+export async function saveScheduleDay(day: ScheduleDay) {
+  await remoteUpsert('schedule_days', touch(day));
 }
 
-export function saveSchedule(sDays: ScheduleDay[]) {
-  for (const d of sDays) saveScheduleDay(d);
+export async function saveSchedule(sDays: ScheduleDay[]) {
+  for (const d of sDays) await saveScheduleDay(d);
 }
 
 // ─── Avans & borç ─────────────────────────────────────────────────────────────
 
-export function giveDebt(input: {
+export async function giveDebt(input: {
   employee_id: string;
   amount: number;
   type: Debt['type'];
@@ -404,10 +377,10 @@ export function giveDebt(input: {
   start_month: string;
   given_at?: string;
   description?: string | null;
-}) {
-  const { orgId, upsert } = useDataStore.getState();
+}): Promise<string> {
+  const { orgId } = useDataStore.getState();
   const id = uuid();
-  upsert('debts', {
+  await remoteUpsert('debts', {
     id,
     org_id: orgId!,
     employee_id: input.employee_id,
@@ -423,29 +396,33 @@ export function giveDebt(input: {
   return id;
 }
 
-export function updateDebtInstallments(debtId: string, installments: number) {
-  const { db, upsert } = useDataStore.getState();
+export async function updateDebtInstallments(debtId: string, installments: number) {
+  const { db } = useDataStore.getState();
   const debt = db.debts.find((d) => d.id === debtId);
-  if (debt) upsert('debts', touch({ ...debt, installments }));
+  if (debt) await remoteUpsert('debts', touch({ ...debt, installments }));
 }
 
-export function deleteDebtIfUnpaid(debtId: string): { ok: boolean; reason?: string } {
-  const { db, remove } = useDataStore.getState();
+export async function deleteDebtIfUnpaid(debtId: string): Promise<{ ok: boolean; reason?: string }> {
+  const { db } = useDataStore.getState();
   const hasPayments = db.debt_payments.some((p) => p.debt_id === debtId && p.amount > 0);
   if (hasPayments) return { ok: false, reason: 'Bu borca ait ödeme var; silinemez, kapatılabilir.' };
-  remove('debts', [debtId]);
-  return { ok: true };
+  try {
+    await remoteDelete('debts', [debtId]);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : 'Silme başarısız' };
+  }
 }
 
-export function recordDebtPayment(input: {
+export async function recordDebtPayment(input: {
   debt_id: string;
   employee_id: string;
   amount: number;
   method: 'elden' | 'maas_kesinti';
   note?: string | null;
 }) {
-  const { orgId, upsert } = useDataStore.getState();
-  upsert('debt_payments', {
+  const { orgId } = useDataStore.getState();
+  await remoteUpsert('debt_payments', {
     id: uuid(),
     org_id: orgId!,
     debt_id: input.debt_id,
@@ -460,9 +437,9 @@ export function recordDebtPayment(input: {
 
 // ─── Yıllık izin ──────────────────────────────────────────────────────────────
 
-export function adjustLeave(input: { employee_id: string; days: number; reason: string; date?: string }) {
-  const { orgId, upsert } = useDataStore.getState();
-  upsert('leave_adjustments', {
+export async function adjustLeave(input: { employee_id: string; days: number; reason: string; date?: string }) {
+  const { orgId } = useDataStore.getState();
+  await remoteUpsert('leave_adjustments', {
     id: uuid(),
     org_id: orgId!,
     employee_id: input.employee_id,
@@ -475,7 +452,7 @@ export function adjustLeave(input: { employee_id: string; days: number; reason: 
 // ─── Bordro ───────────────────────────────────────────────────────────────────
 
 export async function ensurePayroll(year: number, month: number): Promise<Payroll> {
-  const { orgId, db, upsert } = useDataStore.getState();
+  const { orgId, db } = useDataStore.getState();
   const existing = db.payrolls.find((p) => p.year === year && p.month === month);
   if (existing) return existing;
   const payroll: Payroll = {
@@ -489,66 +466,63 @@ export async function ensurePayroll(year: number, month: number): Promise<Payrol
     revert_reason: null,
     created_at: nowISO(),
   };
-  upsert('payrolls', payroll);
+  await remoteUpsert('payrolls', payroll);
   return payroll;
 }
 
 export async function savePayrollItems(payrollId: string, items: PayrollItem[]) {
-  const { upsert } = useDataStore.getState();
-  upsert('payroll_items', items.map((i) => touch(i)));
+  await remoteUpsert('payroll_items', items.map((i) => touch({ ...i, payroll_id: payrollId })));
 }
 
 /** Kesinleştir: atomik anlık görüntü + taksit düşümü (PLAN 4.7) */
 export async function finalizePayroll(payrollId: string, items: PayrollItem[]): Promise<void> {
-  const { orgId, userId, db, upsert, remove } = useDataStore.getState();
+  const { orgId, userId, db } = useDataStore.getState();
   const payroll = db.payrolls.find((p) => p.id === payrollId);
   if (!payroll) throw new Error('Bordro bulunamadı');
 
-  if (isSupabaseConfigured) {
-    const payload = await Promise.all(
-      items.map(async (i) => ({
-        id: i.id,
-        employee_id: i.employee_id,
-        employee_name: i.employee_name,
-        department_name: i.department_name,
-        bonus: i.bonus,
-        extra_cut: i.extra_cut,
-        extra_cut_note: i.extra_cut_note,
-        skip_debt: i.skip_debt,
-        debt_override: i.debt_override,
-        base_salary: i.base_salary,
-        hourly_rate: i.hourly_rate,
-        absence_cut: i.absence_cut,
-        overtime_pay: i.overtime_pay,
-        debt_cut: i.debt_cut,
-        net_payable: i.net_payable,
-        breakdown: i.breakdown,
-        debt_allocations: await Promise.all(
-          (i.breakdown.debtAllocations ?? []).map(async (alloc) => {
-            const paymentId = await deterministicUuid(`dp:${i.id}:${alloc.debt_id}`);
-            return {
-              ...alloc,
-              payment_id: paymentId,
-              paymentId,
-            };
-          })
-        ),
-      }))
-    );
-    const { error } = await supabase.rpc('finalize_payroll', { p_payroll_id: payrollId, p_items: payload });
-    if (error) throw new Error(error.message);
-  }
+  const payload = await Promise.all(
+    items.map(async (i) => ({
+      id: i.id,
+      employee_id: i.employee_id,
+      employee_name: i.employee_name,
+      department_name: i.department_name,
+      bonus: i.bonus,
+      extra_cut: i.extra_cut,
+      extra_cut_note: i.extra_cut_note,
+      skip_debt: i.skip_debt,
+      debt_override: i.debt_override,
+      base_salary: i.base_salary,
+      hourly_rate: i.hourly_rate,
+      absence_cut: i.absence_cut,
+      overtime_pay: i.overtime_pay,
+      debt_cut: i.debt_cut,
+      net_payable: i.net_payable,
+      breakdown: i.breakdown,
+      debt_allocations: await Promise.all(
+        (i.breakdown.debtAllocations ?? []).map(async (alloc) => {
+          const paymentId = await deterministicUuid(`dp:${i.id}:${alloc.debt_id}`);
+          return {
+            ...alloc,
+            payment_id: paymentId,
+            paymentId,
+          };
+        })
+      ),
+    }))
+  );
+  const { error } = await supabase.rpc('finalize_payroll', { p_payroll_id: payrollId, p_items: payload });
+  if (error) throw new Error(error.message);
 
-  // Yerel aynalama (cihaz modu + anında arayüz)
+  // Yerel aynalama (anında arayüz) — RPC başarılı döndükten sonra
   const paidAt = todayISO();
-  remove(
+  useDataStore.getState().remove(
     'debt_payments',
     db.debt_payments.filter((p) => items.some((i) => i.id === p.payroll_item_id)).map((p) => p.id)
   );
-  upsert('payroll_items', items.map((i) => touch({ ...i, paid_amount: 0 })));
+  useDataStore.getState().upsert('payroll_items', items.map((i) => touch({ ...i, paid_amount: 0 })));
   for (const item of items) {
     for (const alloc of item.breakdown.debtAllocations ?? []) {
-      upsert('debt_payments', {
+      useDataStore.getState().upsert('debt_payments', {
         id: await deterministicUuid(`dp:${item.id}:${alloc.debt_id}`),
         org_id: orgId!,
         debt_id: alloc.debt_id,
@@ -561,27 +535,32 @@ export async function finalizePayroll(payrollId: string, items: PayrollItem[]): 
       });
     }
   }
-  upsert('payrolls', { ...payroll, status: 'kesinlesti', finalized_at: nowISO(), finalized_by: userId });
+  useDataStore.getState().upsert('payrolls', { ...payroll, status: 'kesinlesti', finalized_at: nowISO(), finalized_by: userId });
+
+  // Önemli yazma: sunucudan güncel durumu çek
+  await pullAll();
 }
 
 /** Geri al: yalnızca firma sahibi, gerekçeli (PLAN 4.7) */
 export async function revertPayroll(payrollId: string, reason: string): Promise<void> {
-  const { db, upsert, remove } = useDataStore.getState();
+  const { db } = useDataStore.getState();
   const payroll = db.payrolls.find((p) => p.id === payrollId);
   if (!payroll) throw new Error('Bordro bulunamadı');
 
-  if (isSupabaseConfigured) {
-    const { error } = await supabase.rpc('revert_payroll', { p_payroll_id: payrollId, p_reason: reason });
-    if (error) throw new Error(error.message);
-  }
+  const { error } = await supabase.rpc('revert_payroll', { p_payroll_id: payrollId, p_reason: reason });
+  if (error) throw new Error(error.message);
 
   const itemIds = db.payroll_items.filter((i) => i.payroll_id === payrollId).map((i) => i.id);
-  remove('salary_payments', db.salary_payments.filter((p) => itemIds.includes(p.payroll_item_id)).map((p) => p.id));
-  remove('debt_payments', db.debt_payments.filter((p) => p.payroll_item_id && itemIds.includes(p.payroll_item_id)).map((p) => p.id));
+  const st = useDataStore.getState();
+  st.remove('salary_payments', db.salary_payments.filter((p) => itemIds.includes(p.payroll_item_id)).map((p) => p.id));
+  st.remove('debt_payments', db.debt_payments.filter((p) => p.payroll_item_id && itemIds.includes(p.payroll_item_id)).map((p) => p.id));
   for (const item of db.payroll_items.filter((i) => i.payroll_id === payrollId)) {
-    upsert('payroll_items', touch({ ...item, paid_amount: 0 }));
+    st.upsert('payroll_items', touch({ ...item, paid_amount: 0 }));
   }
-  upsert('payrolls', { ...payroll, status: 'taslak', revert_reason: reason });
+  st.upsert('payrolls', { ...payroll, status: 'taslak', revert_reason: reason });
+
+  // Önemli yazma: sunucudan güncel durumu çek
+  await pullAll();
 }
 
 export async function recordSalaryPayment(input: {
@@ -590,8 +569,8 @@ export async function recordSalaryPayment(input: {
   amount: number;
   method: SalaryPaymentMethod;
 }): Promise<void> {
-  const { orgId, db, upsert } = useDataStore.getState();
-  upsert('salary_payments', {
+  const { orgId, db } = useDataStore.getState();
+  await remoteUpsert('salary_payments', {
     id: uuid(),
     org_id: orgId!,
     payroll_item_id: input.payroll_item_id,
@@ -607,7 +586,7 @@ export async function recordSalaryPayment(input: {
       ...db.salary_payments.filter((p) => p.payroll_item_id === item.id),
       { amount: input.amount },
     ];
-    upsert('payroll_items', touch({ ...item, paid_amount: itemPayments.reduce((s, p) => s + p.amount, 0) }));
+    await remoteUpsert('payroll_items', touch({ ...item, paid_amount: itemPayments.reduce((s, p) => s + p.amount, 0) }));
   }
   // Tüm kalemler ödendiyse bordroyu "ödendi" yap
   const payroll = db.payrolls.find((p) => p.id === item?.payroll_id);
@@ -620,7 +599,7 @@ export async function recordSalaryPayment(input: {
       return paid >= i.net_payable - 0.005;
     });
     if (allPaid && payroll.status === 'kesinlesti') {
-      upsert('payrolls', { ...payroll, status: 'odendi' });
+      await remoteUpsert('payrolls', { ...payroll, status: 'odendi' });
     }
   }
 }
@@ -633,68 +612,104 @@ export async function payrollItemIdsFor(payrollId: string, employees: Employee[]
   return map;
 }
 
-// ─── Davet ────────────────────────────────────────────────────────────────────
+// ─── Kullanıcı yönetimi ───────────────────────────────────────────────────────
 
-export async function createInviteCode(): Promise<string> {
-  const { orgId, userId, upsert } = useDataStore.getState();
-  if (isSupabaseConfigured) {
-    const { data, error } = await supabase.rpc('create_invite');
-    if (error) throw new Error(error.message);
-    return data as string;
+/**
+ * Üyeyi şirketten çıkarır. Owner-only; kendini çıkarma ve son Firma Sahibi'ni
+ * çıkarma engellenir. Sunucu tarafında RLS (is_org_owner) aynı kuralı zorlar.
+ */
+export async function removeMember(memberId: string, currentUserId: string): Promise<void> {
+  const st = useDataStore.getState();
+  const members = st.db.org_members.filter((m) => m.org_id === st.orgId);
+  const actor = members.find((m) => m.user_id === currentUserId);
+  const target = members.find((m) => m.id === memberId);
+  if (!actor || actor.role !== 'owner') {
+    throw new Error('Üye çıkarmak için Firma Sahibi yetkisi gerekir.');
   }
-  // Cihaz modu: kod yalnız bu cihazda geçerli
-  const code = String(Math.floor(100000 + Math.random() * 900000));
-  const invite: OrgInvite = {
-    id: uuid(),
-    org_id: orgId!,
-    code,
-    role: 'admin',
-    expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
-    used_by: null,
-    created_by: userId!,
-    created_at: nowISO(),
-  };
-  upsert('org_invites', invite);
-  return code;
-}
-
-export async function joinByInviteCode(code: string): Promise<string> {
-  const { userId, db, upsert, setOrg } = useDataStore.getState();
-  if (isSupabaseConfigured) {
-    const { data, error } = await supabase.rpc('join_organization', { p_code: code.trim() });
-    if (error) throw new Error(error.message);
-    const orgId = data as string;
-    const { data: orgs } = await supabase.from('organizations').select('*').eq('id', orgId);
-    if (orgs?.[0]) upsert('organizations', orgs[0] as Organization, false);
-    setOrg(orgId);
-    return orgId;
+  if (!target) throw new Error('Üye bulunamadı.');
+  if (target.user_id === currentUserId) {
+    throw new Error('Kendinizi şirketten çıkaramazsınız.');
   }
-  const invite = db.org_invites.find((i) => i.code === code.trim() && !i.used_by && new Date(i.expires_at) > new Date());
-  if (!invite) throw new Error('Davet kodu geçersiz veya süresi geçmiş');
-  upsert('org_invites', { ...invite, used_by: userId });
-  upsert('org_members', { id: uuid(), org_id: invite.org_id, user_id: userId!, role: invite.role, created_at: nowISO() }, false);
-  setOrg(invite.org_id);
-  return invite.org_id;
+  const ownerCount = members.filter((m) => m.role === 'owner').length;
+  if (target.role === 'owner' && ownerCount <= 1) {
+    throw new Error('Şirketteki son Firma Sahibi çıkarılamaz.');
+  }
+  await remoteDelete('org_members', [memberId]);
+  await pullAll();
 }
 
 // ─── Hesap silme (Play zorunluluğu, PLAN 8) ───────────────────────────────────
 
-export async function deleteAccountEverywhere(): Promise<void> {
-  if (isSupabaseConfigured) {
-    const { error } = await supabase.functions.invoke('delete-account', { method: 'POST' });
-    if (error) throw new Error('Hesap silinemedi: ' + error.message);
-    await supabase.auth.signOut();
+/** Cihazda kalmış eski yerel yedek/snapshot klasörünü temizler (Faz 2.4) */
+async function purgeLegacyLocalArtifacts() {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const stale = keys.filter(
+      (k) =>
+        k.startsWith('tekstil:local-') ||
+        k.startsWith('tekstil:snapshot:') ||
+        k === 'tekstil:last-sync'
+    );
+    if (stale.length > 0) await AsyncStorage.multiRemove(stale);
+
+    if (Platform.OS !== 'web') {
+      const fs = await import('expo-file-system');
+      const dir = new fs.Directory(fs.Paths.document, 'backups');
+      if (dir.exists) dir.delete();
+    }
+  } catch {
+    // temizlik best-effort — hesap silme akışını bloklamaz
   }
-  // Yerel veriyi ve oturumu temizle
-  await AsyncStorage.multiRemove([
-    'tekstil:local-session',
-    'tekstil:local-accounts',
-    'tekstil:last-sync',
-    'tekstil:prefs',
-  ]);
-  const { replaceDB, setOrg } = useDataStore.getState();
-  const { emptyDB } = await import('./persist');
-  replaceDB(emptyDB());
-  useSyncQueue.getState().setPending([]);
-  setOrg(null);
 }
+
+export async function deleteAccountEverywhere(): Promise<void> {
+  const { error } = await supabase.functions.invoke('delete-account', { method: 'POST' });
+  if (error) throw new Error('Hesap silinemedi: ' + error.message);
+  await supabase.auth.signOut();
+
+  // Bellek içi store + senkron bayraklarını sıfırla
+  const { replaceDB, setOrg } = useDataStore.getState();
+  replaceDB(emptyDB());
+  setOrg(null);
+  useSyncState.getState().reset();
+
+  // Cihazdaki eski kalıntıları (yerel hesaplar, snapshot anahtarları, backups/) temizle
+  await purgeLegacyLocalArtifacts();
+}
+
+// ─── Üretim / Parti Takibi ───────────────────────────────────────────────────
+
+export async function addProductionBatch(input: {
+  id?: string;
+  model_name: string;
+  label_color: import('../types').LabelColor;
+  quantity: number;
+  date?: string;
+  note?: string | null;
+}): Promise<string> {
+  const orgId = useDataStore.getState().orgId;
+  if (!orgId) throw new Error('Firma seçili değil');
+  if (!input.model_name.trim()) throw new Error('Model adı zorunludur');
+  if (!input.quantity || input.quantity <= 0) throw new Error('Adet sıfırdan büyük olmalıdır');
+
+  const id = input.id ?? (await uuid());
+  const row: ProductionBatch = {
+    id,
+    org_id: orgId,
+    model_name: input.model_name.trim(),
+    label_color: input.label_color,
+    quantity: Math.floor(input.quantity),
+    date: input.date ?? todayISO(),
+    note: input.note?.trim() || null,
+    created_at: nowISO(),
+    updated_at: nowISO(),
+  };
+
+  await remoteUpsert('production_batches', row);
+  return id;
+}
+
+export async function deleteProductionBatch(id: string): Promise<void> {
+  await remoteDelete('production_batches', [id]);
+}
+

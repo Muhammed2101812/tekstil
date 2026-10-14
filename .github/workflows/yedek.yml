@@ -2,8 +2,8 @@ name: Supabase Otomatik Yedekleme
 
 on:
   schedule:
-    # Her Pazartesi saat 03:00 UTC (TSİ 06:00)
-    - cron: '0 3 * * 1'
+    # Her gün 03:00 UTC (TSİ 06:00)
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       reason:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   backup:
-    name: Supabase Veritabanı Dökümü ve Arşivleme
+    name: Supabase Dökümü, Şifreleme ve Arşivleme
     runs-on: ubuntu-latest
     steps:
       - name: Kod Deposunu İndir
@@ -32,10 +32,11 @@ jobs:
       - name: Bağımlılıkları Yükle
         run: npm ci
 
-      - name: PostgreSQL Client Araçlarını Doğrula
+      - name: PostgreSQL Client ve GPG Araçlarını Doğrula
         run: |
-          which pg_dump pg_dumpall psql
+          which pg_dump pg_dumpall psql gpg
           pg_dump --version
+          gpg --version | head -n 1
 
       - name: Supabase Veritabanı Dökümünü Al
         env:
@@ -46,7 +47,7 @@ jobs:
             exit 1
           fi
 
-          mkdir -p tmp_dump
+          mkdir -p tmp_dump output
           TIMESTAMP=$(date -u +'%Y-%m-%d-%H%M')
           DUMP_FILENAME="dump-${TIMESTAMP}.sql"
 
@@ -59,7 +60,6 @@ jobs:
           echo "Data dökümü (tüm tablolar) alınıyor..."
           npx supabase db dump --db-url "$SUPABASE_DB_URL" --data-only --use-copy -f tmp_dump/data.sql
 
-          mkdir -p output
           {
             echo "-- ============================================================================"
             echo "-- Atölye Defteri Supabase Veritabanı Dökümü"
@@ -76,12 +76,36 @@ jobs:
           echo "Döküm başarıyla oluşturuldu: output/${DUMP_FILENAME}"
           ls -lh "output/${DUMP_FILENAME}"
 
-      - name: Yedek Deposunu Klonla ve Arşivle
+          echo "DUMP_FILENAME=${DUMP_FILENAME}" >> "$GITHUB_ENV"
+
+      - name: Dökümü GPG ile Şifrele (AES256)
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::error::BACKUP_PASSPHRASE secret'ı tanımlı değil. Yedekler şifrelenmeden commit edilemez."
+            exit 1
+          fi
+
+          # Şifre komut satırında görünmez: passphrase stdin üzerinden verilir (agent.md:
+          # düz SQL asla yedek deposuna commit edilmez)
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 \
+            -o "output/${DUMP_FILENAME}.gpg" "output/${DUMP_FILENAME}"
+
+          # Düz SQL dosyasını hemen sil
+          rm -f "output/${DUMP_FILENAME}"
+          shred -u tmp_dump/*.sql 2>/dev/null || rm -f tmp_dump/*.sql
+
+          echo "Şifreli döküm oluşturuldu: output/${DUMP_FILENAME}.gpg"
+          ls -lh "output/${DUMP_FILENAME}.gpg"
+
+      - name: Yedek Deposuna Push Et (Tek Commit Geçmişi)
         env:
           BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
         run: |
           if [ -z "$BACKUP_REPO_TOKEN" ]; then
-            echo "::error::BACKUP_REPO_TOKEN secret'ı tanımlı değil. Lütfen yedek deposuna yazma yetkisi olan bir PAT (Personal Access Token) tanımlayın."
+            echo "::error::BACKUP_REPO_TOKEN secret'ı tanımlı değil. Lütfen yedek deposuna yazma yetkisi olan bir PAT tanımlayın."
             exit 1
           fi
 
@@ -92,20 +116,20 @@ jobs:
           cd backup_repo
 
           mkdir -p yedekler
-          cp ../output/dump-*.sql yedekler/
+          cp "../output/${DUMP_FILENAME}.gpg" yedekler/
 
-          echo "Eski yedekler temizleniyor (Son 12 döküm saklanır)..."
+          echo "Eski yedekler temizleniyor (son 14 şifreli döküm saklanır)..."
           cd yedekler
-          # Son 12 dökümden eskileri sil
-          ls -tp dump-*.sql 2>/dev/null | grep -v '/$' | tail -n +13 | xargs -I {} rm -f -- {} || true
+          ls -tp dump-*.sql.gpg 2>/dev/null | grep -v '/$' | tail -n +15 | xargs -I {} rm -f -- {} || true
           cd ..
 
+          # Git geçmişinin her gün şişmemesi için orphan dal ile tek commit olarak tut
+          # (agent.md / VERI_GUVENLIGI_PLANI.md Faz 5)
+          git checkout --orphan temp-backup
           git add yedekler/
-          if git diff --staged --quiet; then
-            echo "Yedek deposunda değişiklik yok."
-          else
-            TIMESTAMP=$(date -u +'%Y-%m-%d %H:%M UTC')
-            git commit -m "chore(backup): otomatik veritabani dokumu - ${TIMESTAMP}"
-            git push origin main
-            echo "Yedek deposuna başarıyla push edildi."
-          fi
+          TIMESTAMP=$(date -u +'%Y-%m-%d %H:%M UTC')
+          git commit -m "chore(backup): sifreli gunluk dokum - ${TIMESTAMP}"
+          git branch -D main
+          git branch -m main
+          git push --force origin main
+          echo "Yedek deposuna tek commit olarak push edildi."

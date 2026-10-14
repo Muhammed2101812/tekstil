@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
-import { Card, Header, Screen, SectionHeader, SegmentedControl, useToast } from '../../ui';
+import { router } from 'expo-router';
+import { ChevronRight, Layers } from 'lucide-react-native';
+import { Badge, Card, Header, Screen, SectionHeader, SegmentedControl, useToast } from '../../ui';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useDataStore } from '../../data/store';
-import { useDebts, useDepartments, useDebtPayments, useEmployees } from '../../data/hooks';
+import { useDebts, useDepartments, useDebtPayments, useEmployees, useProductionBatches } from '../../data/hooks';
 import { computePayrollForMonth } from '../../features/bordro/compute';
 import { leaveStatus } from '../../domain/leave';
 import { getMonthPlans, todayISO } from '../../domain/schedule';
@@ -25,9 +27,21 @@ export default function Raporlar() {
   const departments = useDepartments();
   const debts = useDebts();
   const payments = useDebtPayments();
+  const batches = useProductionBatches();
 
   const ayBasligi = `${ayAdi(month)} ${year}`;
   const ym = `${year}-${String(month).padStart(2, '0')}`;
+
+  const productionStats = useMemo(() => {
+    const monthBatches = batches.filter((b) => b.date.startsWith(ym));
+    const totalQty = monthBatches.reduce((s, b) => s + b.quantity, 0);
+    const distinctModels = new Set(monthBatches.map((b) => b.model_name.trim().toLocaleLowerCase('tr-TR'))).size;
+    return {
+      totalQty,
+      batchCount: monthBatches.length,
+      modelCount: distinctModels,
+    };
+  }, [batches, ym]);
 
   const monthInfo = useMemo(() => {
     const plans = getMonthPlans(year, month, db.schedule_days.filter((s) => s.org_id === orgId), db.calendar_events.filter((e) => e.org_id === orgId));
@@ -214,6 +228,46 @@ export default function Raporlar() {
           {ayBasligi} · {monthInfo.plans.totalWorkdays} iş günü
         </Text>
       </View>
+
+      {/* Üretim & Parti Özeti Kartı */}
+      <Card
+        onPress={() => router.push('/uretim' as never)}
+        style={{ marginTop: 10, backgroundColor: c.surfaceContainerLow }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 12 }}>
+            <View
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 12,
+                backgroundColor: c.tertiarySoft,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Layers size={20} color={c.tertiary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={[type.body, { color: c.text, fontWeight: '700' }]}>
+                  Üretim / Parti Takibi
+                </Text>
+                <Badge
+                  label={`${productionStats.totalQty.toLocaleString('tr-TR')} adet`}
+                  tone={productionStats.totalQty > 0 ? 'accent' : 'neutral'}
+                />
+              </View>
+              <Text style={[type.small, { color: c.textMuted, marginTop: 2 }]}>
+                {productionStats.totalQty > 0
+                  ? `${ayBasligi}: ${productionStats.modelCount} farklı model · ${productionStats.batchCount} parti`
+                  : `${ayBasligi} döneminde kayıtlı parti yok`}
+              </Text>
+            </View>
+          </View>
+          <ChevronRight size={18} color={c.textMuted} />
+        </View>
+      </Card>
 
       <SectionHeader title="RAPORLAR" />
       <View style={{ gap: 10 }}>

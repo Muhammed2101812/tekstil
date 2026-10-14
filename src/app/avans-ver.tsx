@@ -52,7 +52,7 @@ export default function AvansVer() {
     };
   }, [employee, amount, installments, startMonth]);
 
-  const save = () => {
+  const save = async () => {
     if (!employeeId) {
       showToast({ message: 'Önce çalışan seçin', tone: 'warning' });
       return;
@@ -62,25 +62,31 @@ export default function AvansVer() {
       return;
     }
     const n = Math.max(1, installments);
-    const debtId = giveDebt({
-      employee_id: employeeId,
-      amount,
-      type: 'avans',
-      installments: n,
-      start_month: startMonth,
-      description: description.trim() || null,
-    });
-    void debtId;
-    hapticSuccess();
-    showToast({
-      message: `${employee?.full_name}: ${formatMoney(amount)} avans kaydedildi`,
-      tone: 'success',
-      undo: () => {
-        deleteDebtIfUnpaid(debtId);
-        showToast({ message: 'Avans geri alındı', tone: 'info' });
-      },
-    });
-    router.back();
+    try {
+      const debtId = await giveDebt({
+        employee_id: employeeId,
+        amount,
+        type: 'avans',
+        installments: n,
+        start_month: startMonth,
+        description: description.trim() || null,
+      });
+      hapticSuccess();
+      showToast({
+        message: `${employee?.full_name}: ${formatMoney(amount)} avans kaydedildi`,
+        tone: 'success',
+        undo: async () => {
+          const res = await deleteDebtIfUnpaid(debtId);
+          showToast({
+            message: res.ok ? 'Avans geri alındı' : res.reason ?? 'Geri alınamadı',
+            tone: res.ok ? 'info' : 'warning',
+          });
+        },
+      });
+      router.back();
+    } catch (e) {
+      showToast({ message: e instanceof Error ? e.message : 'Avans kaydedilemedi', tone: 'warning' });
+    }
   };
 
   return (

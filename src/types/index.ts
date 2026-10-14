@@ -45,6 +45,22 @@ export type CalendarEventType = (typeof CALENDAR_EVENT_TYPES)[number];
 
 export type OvertimeKind = 'hafta_ici' | 'hafta_sonu' | 'resmi_tatil';
 
+// ─── Üretim / Parti Takibi ───────────────────────────────────────────────────
+
+export type LabelColor = 'kraft' | 'blue' | 'green' | 'red' | 'yellow' | 'pink' | 'orange' | 'white';
+
+export interface ProductionBatch {
+  id: string;
+  org_id: string;
+  model_name: string;
+  label_color: LabelColor;
+  quantity: number;
+  date: string; // YYYY-MM-DD
+  note: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 // ─── Çalışma takvimi ─────────────────────────────────────────────────────────
 
 export interface BreakTime {
@@ -142,18 +158,9 @@ export interface OrgMember {
   org_id: string;
   user_id: string;
   role: Role;
-  created_at: string;
-}
-
-/** E-posta gerektirmeyen 6 haneli davet kodu */
-export interface OrgInvite {
-  id: string;
-  org_id: string;
-  code: string; // 6 hane
-  role: Role;
-  expires_at: string;
-  used_by: string | null; // user_id
-  created_by: string;
+  /** auth.users istemciden okunamaz → üyelik satırında yansıtılır */
+  name?: string | null;
+  email?: string | null;
   created_at: string;
 }
 

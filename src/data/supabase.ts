@@ -1,12 +1,15 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { DataDB } from './persist';
-import { QueuedOp } from './queue';
+import { DataDB, useDataStore } from './store';
 
 /**
  * Supabase istemcisi. Uygulamada yalnızca `anon` anahtar bulunur; tüm yetki
- * RLS ile satır bazında verilir (PLAN Bölüm 8). Anahtarlar yoksa uygulama
- * "cihaz modunda" çalışır: veriler sadece telefonda tutulur.
+ * RLS ile satır bazında verilir (agent.md). Anahtarlar yoksa uygulama çevrimiçi
+ * çalışamaz — kök layout yapılandırma hatası ekranı gösterir.
+ *
+ * Yazma kuralı (agent.md): her mutasyon önce `await` ile buradaki
+ * remoteUpsert/remoteDelete (veya RPC/Edge Function) üzerinden gider; işlem
+ * başarılıysa bellek içi store güncellenir, başarısızsa hata fırlatılır.
  */
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
@@ -27,7 +30,7 @@ export const supabase: SupabaseClient = createClient(
   }
 );
 
-/** numeric alanlar Supabase'ten dizgi döner → number'a çevir (PLAN 5) */
+/** numeric alanlar Supabase'ten dizgi döner → number'a çevir */
 const NUMERIC_FIELDS: Partial<Record<keyof DataDB, string[]>> = {
   employee_salaries: ['amount'],
   attendance: ['late_minutes', 'early_leave_minutes'],
@@ -42,6 +45,7 @@ const NUMERIC_FIELDS: Partial<Record<keyof DataDB, string[]>> = {
   salary_payments: ['amount'],
   calendar_events: ['multiplier'],
   payrolls: [],
+  production_batches: ['quantity'],
 };
 
 function toNumbers(table: keyof DataDB, row: Record<string, unknown>): Record<string, unknown> {
@@ -56,56 +60,42 @@ function toNumbers(table: keyof DataDB, row: Record<string, unknown>): Record<st
   return out;
 }
 
-/** Kuyruğu Supabase'e boşaltır: id çakışmasında upsert → idempotent (PLAN 9) */
-export async function flushQueue(ops: QueuedOp[]): Promise<{ ok: QueuedOp[]; failed: QueuedOp[] }> {
-  const db = (await import('./store')).useDataStore.getState().db;
-  const ok: QueuedOp[] = [];
-  const failed: QueuedOp[] = [];
-
-  // Tablo bazında grupla, tek istekte çok satır gönder
-  const byTable = new Map<string, QueuedOp[]>();
-  for (const op of ops) {
-    const list = byTable.get(op.table) ?? [];
-    list.push(op);
-    byTable.set(op.table, list);
-  }
-
-  for (const [table, tableOps] of byTable) {
-    const upserts = tableOps.filter((o) => o.op === 'upsert');
-    const deletes = tableOps.filter((o) => o.op === 'delete');
-
-    if (upserts.length) {
-      const rows = upserts
-        .map((o) => (db[o.table as keyof DataDB] as { id: string }[]).find((r) => r.id === o.rowId))
-        .filter(Boolean) as Record<string, unknown>[];
-      if (rows.length) {
-        const { error } = await supabase.from(table).upsert(rows.map((r) => toNumbers(table as keyof DataDB, r)), {
-          onConflict: 'id',
-        });
-        if (error) failed.push(...upserts);
-        else ok.push(...upserts);
-      } else {
-        ok.push(...upserts); // satır yerelde yok — atlanabilir
-      }
-    }
-    if (deletes.length) {
-      const { error } = await supabase.from(table).delete().in('id', deletes.map((o) => o.rowId));
-      if (error) failed.push(...deletes);
-      else ok.push(...deletes);
-    }
-  }
-
-  return { ok, failed };
+/**
+ * Remote-first yazma: ÖNCE Supabase'e upsert; hata varsa exception fırlatılır ve
+ * bellek içi store'a dokunulmaz. Başarıda store aynası güncellenir.
+ */
+export async function remoteUpsert<T extends keyof DataDB>(
+  table: T,
+  rows: DataDB[T] | DataDB[T][number]
+): Promise<void> {
+  const list = (Array.isArray(rows) ? rows : [rows]) as unknown as Record<string, unknown>[];
+  if (list.length === 0) return;
+  const { error } = await supabase.from(table).upsert(list.map((r) => toNumbers(table, r)), {
+    onConflict: 'id',
+  });
+  if (error) throw new Error(error.message);
+  useDataStore.getState().upsert(table, list as never);
 }
 
-/** Uzaktan değişen satırları çeker (updated_at > lastSync). Son yazan kazanır. */
+/**
+ * Remote-first silme: ÖNCE Supabase'ten siler; hata varsa exception fırlatılır.
+ * Başarıda store aynasından düşürür. (DB tarafında DELETE yalnız firma sahibine
+ * açıktır — 0007_data_protection.sql.)
+ */
+export async function remoteDelete(table: keyof DataDB, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await supabase.from(table).delete().in('id', ids);
+  if (error) throw new Error(error.message);
+  useDataStore.getState().remove(table, ids);
+}
+
+/** Uzaktan değişen satırları çeker (updated_at > lastSync). Uzak satır kazanır. */
 const LAST_SYNC_KEY = 'tekstil:last-sync';
 
 /**
- * Uzaktan gelen satırları yerel tabloyla birleştirir (id bazlı merge).
+ * Uzaktan gelen satırları yerel önbellekle birleştirir (id bazlı merge).
  * - Uzaktaki satır yerelde varsa: uzak kazanır (üzerine yazılır).
  * - Uzaktaki satır yerelde yoksa: listeye eklenir.
- * - Yerelde olup uzakta henüz olmayan satırlar (çevrimdışı yazılmış, kuyrukta bekleyen): KORUNUR.
  */
 export function mergeRowsById<T extends { id: string }>(local: T[], remote: T[]): T[] {
   const merged = [...local];
@@ -117,14 +107,13 @@ export function mergeRowsById<T extends { id: string }>(local: T[], remote: T[])
   return merged;
 }
 
-export async function pullAll(): Promise<{ pulled: number }> {
+export async function pullAll(): Promise<{ pulled: number; ok: boolean }> {
   const tables: (keyof DataDB)[] = [
-    'organizations', 'org_members', 'org_invites', 'departments', 'schedule_days',
+    'organizations', 'org_members', 'departments', 'schedule_days',
     'calendar_events', 'employees', 'employee_salaries', 'attendance', 'attendance_days',
     'overtime', 'debts', 'debt_payments', 'leave_adjustments', 'payrolls',
-    'payroll_items', 'salary_payments',
+    'payroll_items', 'salary_payments', 'production_batches',
   ];
-  const { useDataStore } = await import('./store');
   let threshold = '1970-01-01T00:00:00Z';
   const hasLocalData = (useDataStore.getState().db.employees?.length ?? 0) > 0;
   if (hasLocalData) {
@@ -143,11 +132,11 @@ export async function pullAll(): Promise<{ pulled: number }> {
   }
 
   let pulled = 0;
+  let hadError = false;
   const patch: Partial<DataDB> = {};
   const noUpdatedAtTables: (keyof DataDB)[] = [
     'organizations',
     'org_members',
-    'org_invites',
     'employee_salaries',
     'attendance_days',
     'debt_payments',
@@ -158,8 +147,9 @@ export async function pullAll(): Promise<{ pulled: number }> {
 
   for (const table of tables) {
     if (noUpdatedAtTables.includes(table)) {
-      // bu tablolarda updated_at yok — hepsini çek ve yerelle merge et
+      // bu tablolarda updated_at yok — hepsini çek ve önbellekle merge et
       const all = await supabase.from(table).select('*');
+      if (all.error) hadError = true;
       if (!all.error && all.data) {
         const local = (useDataStore.getState().db[table] ?? []) as { id: string }[];
         const remote = all.data as { id: string }[];
@@ -170,6 +160,7 @@ export async function pullAll(): Promise<{ pulled: number }> {
     }
 
     const { data, error } = await supabase.from(table).select('*').gt('updated_at', threshold);
+    if (error) hadError = true;
     if (error || !data) continue;
     if (data.length > 0) {
       const local = (useDataStore.getState().db[table] ?? []) as { id: string }[];
@@ -182,5 +173,5 @@ export async function pullAll(): Promise<{ pulled: number }> {
     useDataStore.getState().replaceDB({ ...useDataStore.getState().db, ...patch });
   }
   await AsyncStorage.setItem(LAST_SYNC_KEY, new Date().toISOString());
-  return { pulled };
+  return { pulled, ok: !hadError };
 }

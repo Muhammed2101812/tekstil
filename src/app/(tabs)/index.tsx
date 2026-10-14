@@ -14,12 +14,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   AlertCircle,
   ArrowRight,
-  Bell,
   Calendar,
   CheckCircle2,
   ChevronRight,
   Clock,
   Flag,
+  Settings,
   SlidersHorizontal,
   UserCheck,
   Wallet,
@@ -310,42 +310,22 @@ export default function Bugun() {
         </View>
 
         <View style={styles.headerActions}>
-          <Pressable
-            hitSlop={10}
-            onPress={() => {
-              hapticLight();
-              router.push('/ayarlar/bildirimler');
-            }}
-            style={({ pressed }) => [
-              styles.iconBtn,
-              {
-                backgroundColor: c.surfaceContainerLow,
-                opacity: pressed ? 0.8 : 1,
-              },
-            ]}
-            accessibilityLabel="Bildirimler"
-            accessibilityRole="button"
-          >
-            <Bell size={20} color={c.text} />
-          </Pressable>
-
           <Link href="/ayarlar" asChild>
             <Pressable
               hitSlop={10}
               onPress={() => hapticLight()}
               style={({ pressed }) => [
-                styles.profileAvatar,
+                styles.settingsBtn,
                 {
-                  backgroundColor: c.primary,
-                  opacity: pressed ? 0.85 : 1,
+                  backgroundColor: c.surface,
+                  borderColor: c.border,
+                  opacity: pressed ? 0.75 : 1,
                 },
               ]}
-              accessibilityLabel="Ayarlar ve Profil"
+              accessibilityLabel="Ayarlar"
               accessibilityRole="button"
             >
-              <Text style={[styles.avatarInitials, { color: c.onPrimary }]}>
-                {(auth.name || org?.name || 'A').charAt(0).toLocaleUpperCase('tr')}
-              </Text>
+              <Settings size={22} color={c.text} />
             </Pressable>
           </Link>
         </View>
@@ -738,7 +718,7 @@ export default function Bugun() {
               Hızlı İşlemler
             </Text>
             <Text style={[type.bodySm, { color: c.textMuted, marginTop: 1 }]}>
-              Avans ver, ek çalışma planla veya toplu yoklama yap
+              Parti takibi, avans verme veya ek çalışma planlama
             </Text>
           </View>
         </View>
@@ -779,25 +759,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  iconBtn: {
+  settingsBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  profileAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitials: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 15,
-    fontFamily: 'PlusJakartaSans_700Bold',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
   },
   greetingSection: {
     flexDirection: 'row',

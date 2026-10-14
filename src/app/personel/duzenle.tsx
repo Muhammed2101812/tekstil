@@ -132,7 +132,7 @@ export default function CalisanDuzenle() {
     const v = parsed.data;
     try {
       if (editing && employee) {
-        updateEmployee({
+        await updateEmployee({
           ...employee,
           full_name: v.full_name,
           department_id: departmentId,
@@ -150,7 +150,7 @@ export default function CalisanDuzenle() {
         const current = salaries[salaries.length - 1]?.amount ?? 0;
         if (Math.abs(current - salary) > 0.01) {
           const { addSalaryRaise } = await import('../../data/repo');
-          addSalaryRaise(employee.id, salary, todayISO(), 'Formdan güncellendi');
+          await addSalaryRaise(employee.id, salary, todayISO(), 'Formdan güncellendi');
         }
       } else {
         await addEmployee({

@@ -3,8 +3,8 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import * as XLSX from 'xlsx';
 import { PayrollItem, Employee } from '../types';
-import { useDataStore } from '../data/store';
-import { DataDB, emptyDB } from '../data/persist';
+import { DataDB } from '../data/store';
+import { supabase, pullAll } from '../data/supabase';
 
 /**
  * Excel üretimi (PLAN 3.2): SheetJS (xlsx) + paylama.
@@ -136,7 +136,7 @@ export async function shareMesaiExcel(rows: { name: string; hours: number; pay: 
 /**
  * Tüm veri yedeği (PLAN 6.8): Excel sayfa sayfa + geri yüklenebilir JSON.
  */
-export async function shareFullBackupExcel(db: import('../data/persist').DataDB) {
+export async function shareFullBackupExcel(db: DataDB) {
   const wb = XLSX.utils.book_new();
   autoWs(wb, 'Personel', db.employees.map((e) => ({ 'Ad': e.full_name, 'Giriş': e.start_date, 'Aktif': e.active })));
   autoWs(wb, 'Maaşlar', db.employee_salaries.map((s) => ({ 'Çalışan': s.employee_id, 'Tutar': s.amount, 'Başlangıç': s.effective_from })));
@@ -150,7 +150,7 @@ export async function shareFullBackupExcel(db: import('../data/persist').DataDB)
 }
 
 /** JSON yedek: ilişkileri ve jsonb alanları korur, uygulamadan geri yüklenebilir */
-export async function shareFullBackupJson(db: import('../data/persist').DataDB) {
+export async function shareFullBackupJson(db: DataDB) {
   const { File, Paths } = FileSystem;
   const json = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), db }, null, 2);
   const file = new File(Paths.cache, `tam-yedek-${new Date().toISOString().slice(0, 10)}.json`);
@@ -161,18 +161,25 @@ export async function shareFullBackupJson(db: import('../data/persist').DataDB) 
   }
 }
 
-/** JSON yedeği geri yükle (PLAN 8: "JSON yedek boş hesaba geri yüklenebiliyor") */
-export async function restoreFromJsonText(text: string): Promise<{ ok: boolean; error?: string }> {
+/**
+ * JSON yedekten geri yükleme — sunucu tarafı atomik RPC (agent.md):
+ * Yedek içeriği `restore_org_backup` Security Definer fonksiyonuna tek çağrıyla
+ * gönderilir (owner doğrulaması + org eşleşmesi + tek transaction DB tarafında).
+ * Başarıda istemci yalnızca sunucudan güncel durumu çeker (pullAll).
+ */
+export async function restoreBackupFromText(text: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const parsed = JSON.parse(text) as { version?: number; db?: DataDB } & DataDB;
     const dbSource = parsed.db ? parsed.db : parsed;
     if (!dbSource || typeof dbSource !== 'object') return { ok: false, error: 'Geçersiz yedek dosyası' };
-    const merged = { ...emptyDB(), ...dbSource };
+    const payload = { ...(parsed.db ? parsed : {}), db: dbSource };
     // temel bütünlük kontrolü
-    if (!Array.isArray(merged.employees) || !Array.isArray(merged.attendance)) {
+    if (!Array.isArray(payload.db.employees) || !Array.isArray(payload.db.attendance)) {
       return { ok: false, error: 'Yedek eksik tablo içeriyor' };
     }
-    useDataStore.getState().replaceDB(merged);
+    const { error } = await supabase.rpc('restore_org_backup', { p_payload: payload });
+    if (error) return { ok: false, error: error.message };
+    await pullAll();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'Yedek okunamadı' };

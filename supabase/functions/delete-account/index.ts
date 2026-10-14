@@ -53,7 +53,10 @@ Deno.serve(async (req: Request) => {
       .from('org_members')
       .select('id', { count: 'exact', head: true })
       .eq('org_id', m.org_id);
-    if ((count ?? 0) <= 1) ownedAlone.push(m.org_id);
+    // Yalnızca firma SAHİBİ olduğu ve tek üyenin kaldığı firmalar silinir.
+    // Tek başına kalan admin üyeliğinde firma verisi korunur (sahipsiz kalsa
+    // bile yanlışlıkla silinmesin); sadece üyelik kaldırılır.
+    if ((count ?? 0) <= 1 && m.role === 'owner') ownedAlone.push(m.org_id);
     else shared.push(m.org_id);
   }
 

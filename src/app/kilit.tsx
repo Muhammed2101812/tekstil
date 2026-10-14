@@ -5,7 +5,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import { Delete, Fingerprint, Lock } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeProvider';
-import { useThemeStore } from '../state/settings';
+import { useThemeStore, hashPin, pinLockRemaining } from '../state/settings';
 import { hapticLight, hapticSuccess, hapticWarning } from '../utils/haptics';
 
 /** Uygulama kilidi: Biyometrik / PIN koruması (Sade, simetrik & zarif tuş takımı) */
@@ -14,15 +14,29 @@ export default function Kilit() {
   const insets = useSafeAreaInsets();
   const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
   const topInset = Math.max(insets.top, statusBarHeight, Platform.OS === 'ios' ? 44 : 28);
-  const pin = useThemeStore((s) => s.appLockPin);
+  const pinHash = useThemeStore((s) => s.appLockPinHash);
+  const registerPinAttempt = useThemeStore((s) => s.registerPinAttempt);
+  const pinLockUntil = useThemeStore((s) => s.pinLockUntil);
   const setLocked = useThemeStore((s) => s.setLocked);
   const [entered, setEntered] = useState('');
   const [error, setError] = useState(false);
+  const [remaining, setRemaining] = useState(0);
   const bioTried = useRef(false);
   const [hasBiometrics, setHasBiometrics] = useState(false);
 
+  // Bekleme kilidi geri sayımı (Date.now yalnız store yardımcısında — render saf kalır)
+  useEffect(() => {
+    const calc = () => setRemaining(pinLockRemaining());
+    calc();
+    const t = setInterval(calc, 500);
+    return () => clearInterval(t);
+  }, [pinLockUntil]);
+
+  const locked = remaining > 0;
+
   const unlock = () => {
     hapticSuccess();
+    registerPinAttempt(true);
     setLocked(false);
     router.replace('/(tabs)');
   };
@@ -49,8 +63,8 @@ export default function Kilit() {
       bioTried.current = true;
       tryBiometrics();
     }
-    // PIN boş/bozuksa kullanıcıyı kilittte bırakma — kilidi güvenle kapat
-    if (!pin || !/^\d{4}$/.test(pin)) {
+    // PIN özeti boş/bozuksa kullanıcıyı kilide kilitli bırakma — kilidi güvenle kapat
+    if (!pinHash || pinHash.length < 32) {
       useThemeStore.getState().setAppLock(false, null);
       useThemeStore.getState().setLocked(false);
       router.replace('/(tabs)');
@@ -58,17 +72,21 @@ export default function Kilit() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const press = (d: string) => {
+  const press = async (d: string) => {
+    if (locked) return; // bekleme kilidi aktif — tuş takımı kapalı
     hapticLight();
     const next = (entered + d).slice(0, 4);
     setEntered(next);
     setError(false);
     if (next.length === 4) {
-      if (next === pin) {
+      const digest = await hashPin(next);
+      if (pinHash && digest === pinHash) {
         unlock();
       } else {
         hapticWarning();
         setError(true);
+        registerPinAttempt(false); // 5 hatalı denemede 30 sn kilit (settings.ts)
+        setRemaining(pinLockRemaining());
         setTimeout(() => setEntered(''), 350);
       }
     }
@@ -97,9 +115,15 @@ export default function Kilit() {
           <Lock size={32} color={c.primary} strokeWidth={2.4} />
         </View>
         <Text style={[type.title, { color: c.text, marginTop: 16 }]}>Uygulama Kilitli</Text>
-        <Text style={[type.small, { color: c.textMuted, marginTop: 4 }]}>
-          Devam etmek için 4 haneli PIN girin
-        </Text>
+        {locked ? (
+          <Text style={[type.small, { color: c.danger, marginTop: 4, fontWeight: '700' }]}>
+            Çok fazla hatalı deneme — {Math.ceil(remaining / 1000)} saniye bekleyin
+          </Text>
+        ) : (
+          <Text style={[type.small, { color: c.textMuted, marginTop: 4 }]}>
+            Devam etmek için 4 haneli PIN girin
+          </Text>
+        )}
 
         {/* PIN NOKTALARI */}
         <View style={styles.dots}>
@@ -125,7 +149,7 @@ export default function Kilit() {
           })}
         </View>
 
-        {error ? (
+        {error && !locked ? (
           <Text style={[type.small, { color: c.danger, marginTop: 12, fontWeight: '600' }]}>
             PIN hatalı, lütfen tekrar deneyin
           </Text>

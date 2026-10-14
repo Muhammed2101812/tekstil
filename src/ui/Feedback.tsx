@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Animated, Easing, Platform, StyleSheet, Text, View } from 'react-native';
-import { CloudOff } from 'lucide-react-native';
 import { useTheme } from '../theme/ThemeProvider';
 
 export function Skeleton({
@@ -121,19 +120,6 @@ export function ProgressBar({
   );
 }
 
-/** İnce çevrimdışı şeridi (PLAN 6.10) */
-export function OfflineBanner({ pendingCount }: { pendingCount: number }) {
-  const { c, type } = useTheme();
-  if (pendingCount <= 0) return null;
-  return (
-    <View style={[styles.banner, { backgroundColor: c.warningSoft }]}>
-      <CloudOff size={15} color={c.warning} />
-      <Text style={[type.label, { color: c.warning }]}>
-        Çevrimdışı · {pendingCount} kayıt gönderilmeyi bekliyor
-      </Text>
-    </View>
-  );
-}
 
 const styles = StyleSheet.create({
   center: { alignItems: 'center', paddingVertical: 40, paddingHorizontal: 24 },
@@ -145,12 +131,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   track: { height: 8, width: '100%', overflow: 'hidden' },
-  banner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 7,
-    paddingHorizontal: 12,
-  },
 });

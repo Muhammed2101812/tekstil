@@ -1,14 +1,72 @@
 import { create } from 'zustand';
-import { DataDB, emptyDB, PersistAdapter } from './persist';
-import { QueuedOp } from './queue';
+import {
+  AttendanceDay,
+  AttendanceRecord,
+  CalendarEvent,
+  Debt,
+  Department,
+  Employee,
+  EmployeeSalary,
+  LeaveAdjustment,
+  Organization,
+  OrgMember,
+  OvertimeRecord,
+  Payroll,
+  PayrollItem,
+  ProductionBatch,
+  SalaryPayment,
+  ScheduleDay,
+} from '../types';
 
 /**
- * Yerel veri deposu (offline-first, PLAN Bölüm 9):
- * - Her yazma önce yerel DB'ye uygulanır (iyimser güncelleme, <100 ms).
- * - Ardından senkron kuyruğuna eklenir; Supabase modunda bağlantı gelince
- *   id-aralıklı upsert ile gönderilir (çift kayıt oluşmaz).
- * - Okumalar doğrudan yerel DB'den yapılır (zustand seçicileri).
+ * Bellek içi veri önbelleği (agent.md: uygulama tamamen online çalışır).
+ * - Store yalnızca Supabase'ten çekilen / başarılı yazmaların aynasını tutar.
+ * - Kalıcılık YOKTUR: uygulama kapanınca içerik gider, açılışta pullAll doldurur.
+ * - Yazma kuralı: hiçbir satır doğrudan buraya yazılmaz; remoteUpsert/remoteDelete
+ *   (src/data/supabase.ts) başarılı sunucu işleminden sonra bu store'u günceller.
  */
+
+export interface DataDB {
+  organizations: Organization[];
+  org_members: OrgMember[];
+  departments: Department[];
+  schedule_days: ScheduleDay[];
+  calendar_events: CalendarEvent[];
+  employees: Employee[];
+  employee_salaries: EmployeeSalary[];
+  attendance: AttendanceRecord[];
+  attendance_days: AttendanceDay[];
+  overtime: OvertimeRecord[];
+  debts: Debt[];
+  debt_payments: import('../types').DebtPayment[];
+  leave_adjustments: LeaveAdjustment[];
+  payrolls: Payroll[];
+  payroll_items: PayrollItem[];
+  salary_payments: SalaryPayment[];
+  production_batches: ProductionBatch[];
+}
+
+export function emptyDB(): DataDB {
+  return {
+    organizations: [],
+    org_members: [],
+    departments: [],
+    schedule_days: [],
+    calendar_events: [],
+    employees: [],
+    employee_salaries: [],
+    attendance: [],
+    attendance_days: [],
+    overtime: [],
+    debts: [],
+    debt_payments: [],
+    leave_adjustments: [],
+    payrolls: [],
+    payroll_items: [],
+    salary_payments: [],
+    production_batches: [],
+  };
+}
 
 type TableName = keyof DataDB;
 
@@ -16,117 +74,87 @@ interface DataState {
   db: DataDB;
   orgId: string | null;
   userId: string | null;
-  persist: PersistAdapter | null;
   loaded: boolean;
-  _saveTimer: ReturnType<typeof setTimeout> | null;
 
-  init: (persist: PersistAdapter, userId: string, orgId: string | null) => Promise<void>;
+  init: (userId: string, orgId: string | null) => void;
   setOrg: (orgId: string | null) => void;
+  /** Giriş/oturum sonrası gerçek kullanıcıyı bağlar ('anon' başlangıcının yerine) */
   setUserId: (userId: string) => void;
   replaceDB: (db: DataDB) => void;
 
-  upsert<T extends TableName>(table: T, rows: DataDB[T] | DataDB[T][number], enqueue?: boolean): void;
+  /** Yalnız bellek günceller — doğrudan çağrılmaz, remoteUpsert kullanır */
+  upsert<T extends TableName>(table: T, rows: DataDB[T] | DataDB[T][number]): void;
+  /** Yalnız bellek günceller — doğrudan çağrılmaz, remoteDelete kullanır */
   remove(table: TableName, ids: string[]): void;
 }
 
-export const useDataStore = create<DataState>((set, get) => {
-  function scheduleSave() {
-    const { persist, _saveTimer } = get();
-    if (!persist) return;
-    if (_saveTimer) clearTimeout(_saveTimer);
-    const timer = setTimeout(() => {
-      persist.saveDB(get().db).catch(() => undefined);
-    }, 250);
-    set({ _saveTimer: timer });
-  }
+export const useDataStore = create<DataState>((set, get) => ({
+  db: emptyDB(),
+  orgId: null,
+  userId: null,
+  loaded: false,
 
-  return {
-    db: emptyDB(),
-    orgId: null,
-    userId: null,
-    persist: null,
-    loaded: false,
-    _saveTimer: null,
-
-    init: async (persist, userId, orgId) => {
-      const db = (await persist.loadDB()) ?? emptyDB();
-      set({ db, persist, userId, orgId, loaded: true });
-    },
-
-    setOrg: (orgId) => set({ orgId }),
-
-    /** Giriş/oturum sonrası gerçek kullanıcıyı bağlar ('anon' başlangıcının yerine) */
-    setUserId: (userId) => set({ userId }),
-
-    replaceDB: (db) => {
-      set({ db });
-      scheduleSave();
-    },
-
-    upsert: (table, rows, enqueue = true) => {
-      const incoming = (Array.isArray(rows) ? rows : [rows]) as unknown as { id: string }[];
-      const db = { ...get().db } as DataDB;
-      const currentList = [...(db[table] as unknown as { id: string }[])];
-      for (const row of incoming) {
-        const idx = currentList.findIndex((r) => r.id === row.id);
-        if (idx >= 0) currentList[idx] = row; // son yazan kazanır (PLAN 8)
-        else currentList.push(row);
-      }
-      (db[table] as unknown) = currentList;
-      set({ db });
-      scheduleSave();
-      if (enqueue && get().userId) {
-        for (const row of incoming) {
-          useSyncQueue.getState().enqueue({ table, op: 'upsert', rowId: row.id });
-        }
-      }
-    },
-
-    remove: (table, ids) => {
-      const db = { ...get().db } as DataDB;
-      (db[table] as unknown) = (db[table] as unknown as { id: string }[]).filter((r) => !ids.includes(r.id));
-      set({ db });
-      scheduleSave();
-      if (get().userId) {
-        for (const id of ids) {
-          useSyncQueue.getState().enqueue({ table, op: 'delete', rowId: id });
-        }
-      }
-    },
-  };
-});
-
-// ─── Senkron kuyruğu ─────────────────────────────────────────────────────────
-
-interface SyncQueueState {
-  pending: QueuedOp[];
-  online: boolean;
-  flushing: boolean;
-  lastError: string | null;
-  enqueue: (op: Omit<QueuedOp, 'id' | 'at'>) => void;
-  setOnline: (v: boolean) => void;
-  setPending: (ops: QueuedOp[]) => void;
-  setFlushing: (v: boolean, err?: string | null) => void;
-}
-
-export const useSyncQueue = create<SyncQueueState>((set, get) => ({
-  pending: [],
-  online: true,
-  flushing: false,
-  lastError: null,
-  enqueue: (op) => {
-    const q = [...get().pending, { ...op, id: `${op.table}-${op.rowId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, at: new Date().toISOString() }];
-    set({ pending: q });
-    const persist = useDataStore.getState().persist;
-    persist?.saveQueue(q).catch(() => undefined);
+  init: (_userId, _orgId) => {
+    // Bellek içi önbellek: her açılışta boş başlar, pullAll doldurur.
+    set({ userId: _userId, orgId: _orgId, loaded: true });
   },
-  setOnline: (v) => set({ online: v }),
-  setPending: (ops) => {
-    set({ pending: ops });
-    const persist = useDataStore.getState().persist;
-    persist?.saveQueue(ops).catch(() => undefined);
+
+  setOrg: (orgId) => set({ orgId }),
+
+  setUserId: (userId) => set({ userId }),
+
+  replaceDB: (db) => set({ db }),
+
+  upsert: (table, rows) => {
+    const incoming = (Array.isArray(rows) ? rows : [rows]) as unknown as { id: string }[];
+    const db = { ...get().db } as DataDB;
+    const currentList = [...(db[table] as unknown as { id: string }[])];
+    for (const row of incoming) {
+      const idx = currentList.findIndex((r) => r.id === row.id);
+      if (idx >= 0) currentList[idx] = row;
+      else currentList.push(row);
+    }
+    (db[table] as unknown) = currentList;
+    set({ db });
   },
-  setFlushing: (v, err = null) => set({ flushing: v, lastError: err }),
+
+  remove: (table, ids) => {
+    const db = { ...get().db } as DataDB;
+    (db[table] as unknown) = (db[table] as unknown as { id: string }[]).filter((r) => !ids.includes(r.id));
+    set({ db });
+  },
 }));
 
-export type { QueuedOp };
+// ─── Senkron durumu (offline kuyruk yok; yalnız bayraklar) ──────────────────
+
+interface SyncStatusState {
+  online: boolean;
+  lastError: string | null;
+  /** İlk senkron tamamlandı mı? (kurulum sihirbazına yanlış yönlendirmeyi önler) */
+  firstSyncDone: boolean;
+  /** İlk senkron başarısızsa (offline vb.) hata ekranı gösterilir */
+  initialSyncError: boolean;
+  /** DataProvider'ın sync tetikleyicisi — hata ekranındaki "Tekrar Dene" çağırır */
+  triggerSync: (() => void) | null;
+  setOnline: (v: boolean) => void;
+  setLastError: (err: string | null) => void;
+  setFirstSyncDone: (v: boolean) => void;
+  setInitialSyncError: (v: boolean) => void;
+  setTriggerSync: (fn: (() => void) | null) => void;
+  reset: () => void;
+}
+
+export const useSyncState = create<SyncStatusState>((set) => ({
+  online: true,
+  lastError: null,
+  firstSyncDone: false,
+  initialSyncError: false,
+  triggerSync: null,
+  setOnline: (v) => set({ online: v }),
+  setLastError: (err) => set({ lastError: err }),
+  setFirstSyncDone: (v) => set({ firstSyncDone: v }),
+  setInitialSyncError: (v) => set({ initialSyncError: v }),
+  setTriggerSync: (fn) => set({ triggerSync: fn }),
+  reset: () =>
+    set({ online: true, lastError: null, firstSyncDone: false, initialSyncError: false }),
+}));

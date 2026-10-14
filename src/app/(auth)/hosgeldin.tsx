@@ -1,17 +1,15 @@
 import React, { useState } from 'react';
 import {
   Platform,
-  Pressable,
   StatusBar,
   StyleSheet,
   Text,
-  View,
+  View
 } from 'react-native';
 import { router } from 'expo-router';
 import {
   CalendarCheck,
   FileSpreadsheet,
-  ShieldCheck,
   Wallet,
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -42,7 +40,7 @@ const FEATURES = [
 export default function Hosgeldin() {
   const { c, type } = useTheme();
   const insets = useSafeAreaInsets();
-  const { mode, signInWithGoogle } = useAuth();
+  const { isGoogleConfigured, signInWithGoogle } = useAuth();
   const { showToast } = useToast();
   const [googleBusy, setGoogleBusy] = useState(false);
 
@@ -102,7 +100,7 @@ export default function Hosgeldin() {
 
       {/* Giriş seçenekleri */}
       <View style={styles.actions}>
-        {mode === 'supabase' ? (
+        {isGoogleConfigured ? (
           <Button
             label={googleBusy ? 'Giriş yapılıyor…' : 'Google ile devam et'}
             variant="secondary"
@@ -127,27 +125,6 @@ export default function Hosgeldin() {
             router.push('/(auth)/giris');
           }}
         />
-        <Pressable
-          onPress={() => {
-            hapticLight();
-            router.push('/(auth)/davet');
-          }}
-          hitSlop={10}
-          style={styles.inviteBtn}
-          accessibilityRole="button"
-        >
-          <Text style={[type.small, { color: c.primary, fontWeight: '600' }]}>
-            Firma davet kodum var
-          </Text>
-        </Pressable>
-        {mode === 'local' ? (
-          <View style={styles.localNote}>
-            <ShieldCheck size={14} color={c.textMuted} />
-            <Text style={[type.bodySm, { color: c.textMuted }]}>
-              Veriler bu telefonda saklanır, sunucuya gitmez.
-            </Text>
-          </View>
-        ) : null}
       </View>
     </View>
   );
@@ -189,16 +166,5 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: 10,
-  },
-  inviteBtn: {
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  localNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: 2,
   },
 });

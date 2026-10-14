@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { HandCoins, Clock4, CalendarOff, UserPlus, CalendarPlus } from 'lucide-react-native';
+import { HandCoins, Clock4, CalendarOff, UserPlus, CalendarPlus, Layers } from 'lucide-react-native';
 import { BottomSheet, TextField, STATUS_META , useToast } from '../ui';
 import { useTheme } from '../theme/ThemeProvider';
 import { useEmployees, useDayAttendance, useSchedule, useEvents } from '../data/hooks';
@@ -56,6 +56,16 @@ export function QuickActionsSheet({ visible, onClose }: { visible: boolean; onCl
       icon: <UserPlus size={24} color={c.success} />,
       bg: c.successSoft,
       onPress: () => router.push('/personel/duzenle'),
+    },
+    {
+      label: 'Üretim / Parti',
+      desc: 'Model ve meto etiketi gir',
+      icon: <Layers size={24} color={c.tertiary} />,
+      bg: c.tertiarySoft,
+      onPress: () => {
+        onClose();
+        router.push('/uretim' as never);
+      },
     },
     {
       label: 'Ek Çalışma Günü',

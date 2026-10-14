@@ -68,8 +68,7 @@ d('RLS — firmalar birbirinin verisini göremez', () => {
     expect(writes.error).toBeTruthy();
   });
 
-  test('Davet koduyla katılma ve bordro RPC akışı', async () => {
-    // Çalışan + maaş + borç
+  test('Bordro RPC akışı: kesinleştirme ve geri alma', async () => {    // Çalışan + maaş + borç
     const empId = crypto.randomUUID();
     const debtId = crypto.randomUUID();
     const payrollId = crypto.randomUUID();
@@ -113,12 +112,8 @@ d('RLS — firmalar birbirinin verisini göremez', () => {
     const fin2 = await a.rpc('finalize_payroll', { p_payroll_id: payrollId, p_items: items });
     expect(fin2.error).toBeTruthy();
 
-    // Davet: B katılır, yönetici olarak okur; geri alma yalnızca sahipte
-    const { data: code } = await a.rpc('create_invite');
-    expect(code).toMatch(/^\d{6}$/);
-    const join = await b.rpc('join_organization', { p_code: code });
-    expect(join.error).toBeNull();
-
+    // Davet kodu akışı kaldırıldı (0006): B firmaya üye alınamaz; yetkisiz
+    // işlem reddedilir — bordro geri alma yalnızca firma sahibinde
     const revertAsB = await b.rpc('revert_payroll', { p_payroll_id: payrollId, p_reason: 'deneme' });
     expect(revertAsB.error).toBeTruthy();
 
@@ -128,8 +123,6 @@ d('RLS — firmalar birbirinin verisini göremez', () => {
     // Geri alınca borç düşümü de döner
     const { count: dp } = await a.from('debt_payments').select('id', { count: 'exact', head: true }).eq('debt_id', debtId);
     expect(dp).toBe(0);
-
-    await b.from('org_members').delete().eq('org_id', orgId).eq('user_id', (await b.auth.getUser()).data.user!.id);
   });
 
   test('upsert_attendance_bulk: tek işlemde yazar, tekrar gönderim çift kayıt yapmaz', async () => {
@@ -151,6 +144,130 @@ d('RLS — firmalar birbirinin verisini göremez', () => {
       .eq('org_id', orgId).eq('day', day);
     expect(confirmed).toBe(1);
 
+    // 0007: employee_id FK NO ACTION — geçmişi olan çalışan silinemez;
+    // önce puantajı temizle (owner DELETE yetkisi 0007 ile kısıtlandı)
+    await a.from('attendance').delete().eq('employee_id', empId);
+    const delEmp = await a.from('employees').delete().eq('id', empId);
+    expect(delEmp.error).toBeNull();
+  });
+
+  test('Kullanıcı yönetimi (0006): 1:1 firma kuralı ve owner-only üye silme', async () => {
+    // 1:1 — A zaten bir firmaya sahip; ikinci firma kuramaz (UNIQUE user_id)
+    const second = await a.rpc('create_organization', { p_name: 'İkinci Atölye' });
+    expect(second.error).toBeTruthy();
+
+    // Üye olmayan B, A'nın üyelik satırını silemez (RLS is_org_owner;
+    // DELETE policy ihlali hata yerine 0 satır etkiler)
+    const { data: aMembers } = await a.from('org_members').select('id').eq('org_id', orgId);
+    const memberId = aMembers?.[0]?.id;
+    expect(memberId).toBeTruthy();
+    await b.from('org_members').delete().eq('id', memberId);
+
+    const { count: after } = await a.from('org_members').select('id', { count: 'exact', head: true })
+      .eq('org_id', orgId);
+    expect(after).toBe(1);
+  });
+
+  // ─── 0007: Veri koruma katmanı ─────────────────────────────────────────────
+
+  test('0007: geçmişi olan çalışan silinemez (employee_id FK NO ACTION)', async () => {
+    const empId = crypto.randomUUID();
+    await a.from('employees').insert({
+      id: empId, org_id: orgId, full_name: 'Hasan Geçmişli', start_date: '2026-01-01',
+    });
+    await a.from('attendance').insert({
+      id: crypto.randomUUID(), org_id: orgId, employee_id: empId, day: '2026-11-13', status: 'geldi',
+    });
+
+    // Owner olsa bile FK NO ACTION reddeder
+    const del = await a.from('employees').delete().eq('id', empId);
+    expect(del.error).toBeTruthy();
+
+    // Temizlik: önce çocuk satırlar
+    await a.from('attendance').delete().eq('employee_id', empId);
+    const del2 = await a.from('employees').delete().eq('id', empId);
+    expect(del2.error).toBeNull();
+  });
+
+  test('0007: kesinleşmiş bordro doğrudan silinemez (trigger kilidi)', async () => {
+    const empId = crypto.randomUUID();
+    const payrollId = crypto.randomUUID();
+    await a.from('employees').insert({
+      id: empId, org_id: orgId, full_name: 'Trigger Test Çalışanı', start_date: '2026-01-01',
+    });
+    await a.from('payrolls').insert({ id: payrollId, org_id: orgId, year: 2026, month: 10 });
+
+    const items = [{
+      id: crypto.randomUUID(), employee_id: empId, employee_name: 'Trigger Test Çalışanı',
+      department_name: null, bonus: 0, extra_cut: 0, extra_cut_note: null, skip_debt: false,
+      debt_override: null, base_salary: 30000, hourly_rate: 153.85, absence_cut: 0,
+      overtime_pay: 0, debt_cut: 0, net_payable: 30000, breakdown: { lines: [] },
+    }];
+    const fin = await a.rpc('finalize_payroll', { p_payroll_id: payrollId, p_items: items });
+    expect(fin.error).toBeNull();
+
+    const del = await a.from('payrolls').delete().eq('id', payrollId);
+    expect(del.error?.message).toMatch(/Kesinleşmiş bordro/);
+
+    // Kalemi de doğrudan silmeye çalışmak aynı kilide takılır
+    const { data: itemRows } = await a.from('payroll_items').select('id').eq('payroll_id', payrollId);
+    const delItem = await a.from('payroll_items').delete().eq('id', itemRows?.[0]?.id);
+    expect(delItem.error?.message).toMatch(/Kesinleşmiş bordro/);
+
+    // 0007 3b: UPDATE ile kilidi aşma denemesi de reddedilir
+    const upd = await a.from('payrolls').update({ status: 'taslak' }).eq('id', payrollId);
+    expect(upd.error?.message).toMatch(/Kesinleşmiş bordro doğrudan değiştirilemez/);
+
+    // Kesinleşmiş kalemin tutarı da UPDATE ile değiştirilemez
+    const updItem = await a.from('payroll_items').update({ net_payable: 1 }).eq('id', itemRows?.[0]?.id);
+    expect(updItem.error?.message).toMatch(/doğrudan değiştirilemez/);
+
+    // Geri alma RPC'si çalışır (owner + gerekçe), ardından taslak silinebilir
+    const revert = await a.rpc('revert_payroll', { p_payroll_id: payrollId, p_reason: 'trigger testi' });
+    expect(revert.error).toBeNull();
+    const delDraft = await a.from('payrolls').delete().eq('id', payrollId);
+    expect(delDraft.error).toBeNull();
     await a.from('employees').delete().eq('id', empId);
+  });
+
+  test('0007: restore_org_backup — yetki, org eşleşmesi ve atomik geri yükleme', async () => {
+    const { data: orgRow } = await a.from('organizations').select('*').eq('id', orgId).single();
+    expect(orgRow).toBeTruthy();
+
+    const empId = crypto.randomUUID();
+    const restoredEmp = {
+      id: empId, org_id: orgId, full_name: 'Geri Yüklenen Çalışan', start_date: '2026-02-01',
+      active: true,
+    };
+
+    // Yetkisiz kullanıcı (B, firma sahibi değil) reddedilir
+    const asB = await b.rpc('restore_org_backup', {
+      p_payload: { db: { organizations: [orgRow], employees: [restoredEmp] } },
+    });
+    expect(asB.error?.message).toMatch(/firma sahibi/i);
+
+    // Başka firmanın yedeği reddedilir
+    const wrongOrg = await a.rpc('restore_org_backup', {
+      p_payload: {
+        db: {
+          organizations: [{ ...orgRow, id: crypto.randomUUID() }],
+          employees: [{ ...restoredEmp, org_id: crypto.randomUUID() }],
+        },
+      },
+    });
+    expect(wrongOrg.error?.message).toMatch(/bu şirkete ait değil/);
+
+    // Geçerli geri yükleme: eski çalışanlar silinir, yedektekiler yazılır
+    const beforeEmps = await a.from('employees').select('id').eq('org_id', orgId);
+    expect((beforeEmps.data ?? []).length).toBeGreaterThan(0);
+
+    const ok = await a.rpc('restore_org_backup', {
+      p_payload: { version: 1, db: { organizations: [orgRow], employees: [restoredEmp] } },
+    });
+    expect(ok.error).toBeNull();
+
+    const afterEmps = await a.from('employees').select('id, full_name').eq('org_id', orgId);
+    expect(afterEmps.data).toHaveLength(1);
+    expect(afterEmps.data?.[0]?.full_name).toBe('Geri Yüklenen Çalışan');
   });
 });

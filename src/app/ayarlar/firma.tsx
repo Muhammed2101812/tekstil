@@ -25,9 +25,13 @@ export default function AyarFirma() {
         <Button
           label="Kaydet"
           disabled={name.trim().length < 2 || name === org?.name}
-          onPress={() => {
-            updateOrgProfile(name.trim(), org?.logo_url ?? null);
-            showToast({ message: 'Firma adı güncellendi', tone: 'success' });
+          onPress={async () => {
+            try {
+              await updateOrgProfile(name.trim(), org?.logo_url ?? null);
+              showToast({ message: 'Firma adı güncellendi', tone: 'success' });
+            } catch (e) {
+              showToast({ message: e instanceof Error ? e.message : 'Güncellenemedi', tone: 'warning' });
+            }
           }}
         />
       </View>

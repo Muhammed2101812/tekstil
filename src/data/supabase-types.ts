@@ -514,65 +514,30 @@ export type Database = {
           },
         ]
       }
-      org_invites: {
-        Row: {
-          code: string
-          created_at: string
-          created_by: string | null
-          expires_at: string
-          id: string
-          org_id: string
-          role: string
-          used_by: string | null
-        }
-        Insert: {
-          code: string
-          created_at?: string
-          created_by?: string | null
-          expires_at: string
-          id: string
-          org_id: string
-          role?: string
-          used_by?: string | null
-        }
-        Update: {
-          code?: string
-          created_at?: string
-          created_by?: string | null
-          expires_at?: string
-          id?: string
-          org_id?: string
-          role?: string
-          used_by?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "org_invites_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       org_members: {
         Row: {
           created_at: string
+          email: string | null
           id: string
+          name: string | null
           org_id: string
           role: string
           user_id: string
         }
         Insert: {
           created_at?: string
+          email?: string | null
           id: string
+          name?: string | null
           org_id: string
           role?: string
           user_id: string
         }
         Update: {
           created_at?: string
+          email?: string | null
           id?: string
+          name?: string | null
           org_id?: string
           role?: string
           user_id?: string
@@ -813,6 +778,50 @@ export type Database = {
           },
         ]
       }
+      production_batches: {
+        Row: {
+          created_at: string
+          date: string
+          id: string
+          label_color: string
+          model_name: string
+          note: string | null
+          org_id: string
+          quantity: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          date?: string
+          id?: string
+          label_color: string
+          model_name: string
+          note?: string | null
+          org_id: string
+          quantity: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          id?: string
+          label_color?: string
+          model_name?: string
+          note?: string | null
+          org_id?: string
+          quantity?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "production_batches_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       salary_payments: {
         Row: {
           amount: number
@@ -927,17 +936,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      create_invite: { Args: { p_role?: string }; Returns: string }
       create_organization: {
         Args: { p_logo_url?: string; p_name: string }
         Returns: string
       }
       current_user_org_ids: { Args: never; Returns: string[] }
+      fill_defaults: { Args: { p_rows: Json; p_table: string }; Returns: Json }
       finalize_payroll: {
         Args: { p_items: Json; p_payroll_id: string }
         Returns: undefined
       }
-      join_organization: { Args: { p_code: string }; Returns: string }
+      get_user_id_by_email: { Args: { p_email: string }; Returns: string }
+      restore_org_backup: { Args: { p_payload: Json }; Returns: undefined }
       revert_payroll: {
         Args: { p_payroll_id: string; p_reason: string }
         Returns: undefined

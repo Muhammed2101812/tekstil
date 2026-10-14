@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Clock } from 'lucide-react-native';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { BottomSheet } from './BottomSheet';
 import { ChipGroup } from './Chip';
@@ -137,6 +137,19 @@ export function DateField({
   const [iosOpen, setIosOpen] = useState(false);
   const [iosDate, setIosDate] = useState(() => (value ? new Date(y, m - 1, d, 12) : new Date()));
 
+  if (Platform.OS === 'web') {
+    return (
+      <TextField
+        label={label}
+        value={value ?? ''}
+        onChangeText={(text) => onPick(text.trim())}
+        placeholder="YYYY-AA-GG (Örn: 2026-10-14)"
+        error={error}
+        hint={hint ?? 'Format: YYYY-AA-GG'}
+      />
+    );
+  }
+
   return (
     <>
       <TextField
@@ -157,13 +170,13 @@ export function DateField({
                 onPick(`${p.getFullYear()}-${String(p.getMonth() + 1).padStart(2, '0')}-${String(p.getDate()).padStart(2, '0')}`);
               },
             });
-          } else {
+          } else if (Platform.OS === 'ios') {
             setIosDate(value ? new Date(y, m - 1, d, 12) : new Date());
             setIosOpen(true);
           }
         }}
       />
-      {Platform.OS !== 'android' ? (
+      {Platform.OS === 'ios' ? (
         <BottomSheet visible={iosOpen} onClose={() => setIosOpen(false)} title={label}>
           <View style={{ alignItems: 'center', marginVertical: 12 }}>
             <DateTimePicker
@@ -182,6 +195,100 @@ export function DateField({
                 onPick(
                   `${iosDate.getFullYear()}-${String(iosDate.getMonth() + 1).padStart(2, '0')}-${String(iosDate.getDate()).padStart(2, '0')}`
                 );
+                setIosOpen(false);
+              }}
+            />
+          </View>
+        </BottomSheet>
+      ) : null}
+    </>
+  );
+}
+
+/** Saat alanı (dokununca alarm/sistem saat seçici açılır) */
+export function TimeField({
+  label,
+  value,
+  onPick,
+  error,
+  hint,
+}: {
+  label: string;
+  value: string; // 'HH:mm'
+  onPick: (time: string) => void;
+  error?: string | null;
+  hint?: string | null;
+}) {
+  const { c } = useTheme();
+  const [h, m] = (value || '08:00').split(':').map(Number);
+  const [iosOpen, setIosOpen] = useState(false);
+  const [iosDate, setIosDate] = useState(() => new Date(2026, 0, 1, isNaN(h) ? 8 : h, isNaN(m) ? 0 : m));
+
+  if (Platform.OS === 'web') {
+    return (
+      <TextField
+        label={label}
+        value={value}
+        onChangeText={(text) => onPick(text.trim())}
+        placeholder="HH:mm"
+        error={error}
+        hint={hint}
+        right={<Clock size={18} color={c.textMuted} />}
+      />
+    );
+  }
+
+  return (
+    <>
+      <TextField
+        label={label}
+        value={value || 'Seç'}
+        onChangeText={() => undefined}
+        placeholder="HH:mm"
+        error={error}
+        hint={hint}
+        right={<Clock size={18} color={c.textMuted} />}
+        onPress={() => {
+          const currentH = isNaN(h) ? 8 : h;
+          const currentM = isNaN(m) ? 0 : m;
+          if (Platform.OS === 'android') {
+            DateTimePickerAndroid.open({
+              value: new Date(2026, 0, 1, currentH, currentM),
+              mode: 'time',
+              is24Hour: true,
+              onChange: (_e, picked) => {
+                if (!picked) return;
+                const hh = String(picked.getHours()).padStart(2, '0');
+                const mm = String(picked.getMinutes()).padStart(2, '0');
+                onPick(`${hh}:${mm}`);
+              },
+            });
+          } else if (Platform.OS === 'ios') {
+            setIosDate(new Date(2026, 0, 1, currentH, currentM));
+            setIosOpen(true);
+          }
+        }}
+      />
+      {Platform.OS === 'ios' ? (
+        <BottomSheet visible={iosOpen} onClose={() => setIosOpen(false)} title={label}>
+          <View style={{ alignItems: 'center', marginVertical: 12 }}>
+            <DateTimePicker
+              value={iosDate}
+              mode="time"
+              is24Hour
+              display="spinner"
+              onChange={(_e, date) => {
+                if (date) setIosDate(date);
+              }}
+            />
+          </View>
+          <View style={{ gap: 10, marginTop: 12 }}>
+            <Button
+              label="Tamam"
+              onPress={() => {
+                const hh = String(iosDate.getHours()).padStart(2, '0');
+                const mm = String(iosDate.getMinutes()).padStart(2, '0');
+                onPick(`${hh}:${mm}`);
                 setIosOpen(false);
               }}
             />

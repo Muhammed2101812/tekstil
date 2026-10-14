@@ -1,193 +1,104 @@
-# Atölye Defteri — Çok Katmanlı Veri Güvenliği ve Yedekleme Kılavuzu
+# Atölye Defteri — Veri Güvenliği ve Yedekleme Kılavuzu
 
-Bu belge, Atölye Defteri uygulamasının veri güvenliği mimarisini, otomatik yedekleme katmanlarını ve felaket kurtarma (disaster recovery) senaryolarını detaylandırır.
+Bu belge, Atölye Defteri uygulamasının veri güvenliği mimarisini, yedekleme katmanlarını ve felaket kurtarma (disaster recovery) senaryolarını detaylandırır. Mimari kurallar için `agent.md`, uygulama planı için `docs/VERI_GUVENLIGI_PLANI.md` dosyalarına bakınız.
 
 ---
 
-## 1. Çok Katmanlı Güvenlik Mimarisi
+## 1. Mimari Özet (Tamamen Online)
 
-Uygulama, verilerin hiçbir koşulda kaybolmaması için **4 bağımsız katmanda** veri koruması sağlar:
+Uygulama **tamamen online (Supabase-first)** çalışır: cihaz modu, offline senkron kuyruğu ve yerel JSON DB dosyası kaldırılmıştır (bkz. `agent.md`). Her mutasyon önce `await` ile Supabase'e gider; başarıda bellek içi Zustand önbelleği güncellenir. Veri tazeliği; ilk girişte, uygulama öne gelince, ağ dönünce, 60 sn'de bir ve önemli yazmalardan sonra `pullAll()` ile sağlanır.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│ KATMAN 1: Cihaz İçi Otomatik Anlık Görüntüler (Local Snapshots)        │
-│ • Her gün açılışta bir kez (24 saatte bir)                             │
-│ • Uygulama sürümü değiştiğinde (güncelleme sonrası koruma)             │
-│ • Geri yükleme işlemi yapılmadan hemen önce                            │
-│ • Son 7 snapshot saklanır; bozuk dosyalar otomatik temizlenir          │
-└────────────────────────────────────┬───────────────────────────────────┘
-                                     │
-┌────────────────────────────────────▼───────────────────────────────────┐
-│ KATMAN 2: Paylaşılabilir Manuel JSON Yedeği + Haftalık Hatırlatma       │
-│ • Ayarlar > Hesap üzerinden tek dokunuşla dışa aktarım (Share/Save)    │
-│ • Cuma 17:00 haftalık yerel bildirim ile kullanıcıyı teşvik            │
-│ • Google Drive, e-posta, harici diske taşınabilir                      │
-└────────────────────────────────────┬───────────────────────────────────┘
-                                     │
-┌────────────────────────────────────▼───────────────────────────────────┐
-│ KATMAN 3: Supabase Bulut Veritabanı (Canlı Çift Yönlü Senkron)         │
-│ • Çevrimdışı öncelikli (offline-first) kuyruk ile otomatik aktarım     │
-│ • Satır Düzeyinde Güvenlik (RLS) ile organizasyon izolasyonu           │
-│ • `onAuthStateChange` ve açılışta otomatik `pullRemoteAll()`           │
-└────────────────────────────────────┬───────────────────────────────────┘
-                                     │
-┌────────────────────────────────────▼───────────────────────────────────┐
-│ KATMAN 4: GitHub Actions Otomatik Uzak Dump (`tekstil-yedekler`)        │
-│ • Her Pazartesi 03:00 UTC zamanlanmış tetikleyici + manuel tetikleme   │
-│ • `npx supabase db dump`: Roller + Şema (public/auth) + Veriler       │
-│ • Ayrı özel (private) depoya şifreli commit & push                     │
-│ • Son 12 haftalık döküm saklama politikası (otomatik budama)           │
-│ • Yan etki avantajı: Ücretsiz planın 7 günlük uykuya geçmesini önler   │
+│ KATMAN 1: Supabase Canlı Veritabanı (tek gerçek kaynak)                │
+│ • RLS: firma izolasyonu; iş tablolarında DELETE yalnız Firma Sahibi    │
+│ • employee_id FK'ları ON DELETE NO ACTION (zincirleme silme yok)       │
+│ • Kesinleşmiş bordrolar trigger ile silinemez (revert_payroll ile)     │
+│ • 14 tabloda audit log (kim, neyi, ne zaman; DELETE'te tam satır)      │
+└────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│ KATMAN 2: Paylaşılabilir Manuel JSON Yedeği                            │
+│ • Ayarlar → Hesap → "JSON Yedeği Al" (geri yüklenebilir tam yedek)     │
+│ • Geri yükleme: restore_org_backup RPC — tek transaction, owner-only   │
+└────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│ KATMAN 3: GitHub Actions Günlük Şifreli Dump (`tekstil-yedekler`)      │
+│ • Her gün 03:00 UTC + manuel tetikleme                                 │
+│ • GPG simetrik AES256 (BACKUP_PASSPHRASE); düz SQL asla commit edilmez │
+│ • Orphan dal + force push: geçmiş tek commit, şişmez                   │
+│ • Son 14 şifreli döküm saklanır                                        │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. Geri Getirme Senaryoları (Disaster Recovery)
+## 2. Veri Koruma Kuralları (0007_data_protection.sql)
 
-### Senaryo 1 (S1): Cihaz Kaybı / Yeni Telefona Geçiş
-
-**Problem:** Kullanıcının telefonu bozuldu, kayboldu veya yeni bir cihaza geçti.
-
-**Çözüm:** Veriler Supabase bulutunda güvenle saklanmaktadır. Yeni cihaza kurulup oturum açıldığında veriler otomatik geri gelir.
-
-**Adım Adım Kurtarma:**
-1. Yeni telefona Atölye Defteri uygulamasını yükleyin.
-2. Açılış ekranında önceki hesap yöntemiyle (**Google ile Devam Et** veya **E-posta & Şifre**) giriş yapın.
-3. Oturum açıldığı anda `DataProvider` arka planda `pullRemoteAll()` işlemini başlatır:
-   - Tüm çalışanlar (`employees`)
-   - Günlük yoklamalar (`attendance`)
-   - Maaş ve hakediş bordroları (`payroll`)
-   - Borç ve avans kayıtları (`debts`)
-   - Çalışma takvimi (`schedule_days`)
-   - Şirket ayarları (`org_settings`)
-4. Cihazdaki yerel `tekstil-db.json` veritabanı buluttaki güncel verilerle doldurulur ve uygulama kullanıma hazır hale gelir.
-
-> **Önemli Not (Fotoğraflar):** Çalışan fotoğrafları mobil cihazın yerel dosya sisteminde (`file://...`) tutulur. Bulut veritabanına sadece metin ve rakam verileri senkronize edilir. Yeni cihazda çalışan kartları ve geçmişi eksiksiz gelir ancak profil fotoğraflarını yeniden seçmek gerekir.
+1. **Satır silme (DELETE) RLS'i** yalnızca Firma Sahibi'ne açıktır: `employees`, `attendance`, `attendance_days`, `overtime`, `debts`, `debt_payments`, `payrolls`, `payroll_items`, `salary_payments`, `employee_salaries`.
+2. **Zincirleme silme yok:** `employee_id` FK'ları `ON DELETE NO ACTION` — geçmişi olan çalışan silinemez; personel yalnız pasifleştirilir (`active=false`).
+3. **Kesinleşmiş bordro kilidi:** `status <> 'taslak'` bordro ve kalemleri doğrudan silinemez; yalnız `revert_payroll` RPC'si (owner + gerekçe) ile taslağa döner.
+4. **Atomik geri yükleme:** `restore_org_backup(p_payload JSONB)` — owner doğrular, başka firmanın yedeğini reddeder, tek transaction'da eskiyi silip yedeği yazar.
 
 ---
 
-### Senaryo 2 (S2): Uygulama Hatası / Yanlış İşlem / Bozuk Yerel Veritabanı
+## 3. Geri Getirme Senaryoları (Disaster Recovery)
 
-**Problem:** Hatalı bir toplu işlem yapıldı, yanlışlıkla çalışan/bordro silindi veya dosya sistemi bozuldu.
+### S1: Cihaz Kaybı / Yeni Telefon
+Yeni cihaza uygulama kurulup aynı hesapla giriş yapılır; `pullAll()` tüm veriyi çeker. Yerel kalıcı veri olmadığından ek işlem gerekmez. (Çalışan fotoğrafları cihaz yerelindedir; yeniden seçilmelidir.)
 
-#### Yöntem 2A — Yerel Anlık Görüntüden (Snapshot) Dönme (En Hızlı Yol)
-1. Uygulamada **Ayarlar → Hesap** ekranına gidin.
-2. **"OTOMATİK YEREL YEDEKLER"** kartına bakın.
-3. Listeden hatadan önceki bir tarih/saate ait anlık görüntünün yanındaki **"Geri Yükle"** düğmesine dokunun.
-4. Sistem, mevcut veritabanınızın bir güvenlik kopyasını otomatik olarak alır ve seçilen snapshot'ı devreye sokar.
-5. İşlem bittiğinde uygulama verileri anında yenilenir ve offline kuyruk üzerinden bulutla eşitlenir.
+### S2: Hatalı İşlem / Yanlış Silme / Veri Bozulması
+1. **En hızlı yol — JSON yedeği:** Ayarlar → Hesap → "Yedekten Geri Yükle". Dosya, `restore_org_backup` RPC'sine tek çağrıyla gönderilir; sunucu tek transaction'da eski durumu yedekle değiştirir ve istemci `pullAll()` ile ekranı tazeler. Bu işlemi yalnızca Firma Sahibi yapabilir.
+2. **Sunucu tarafı müdahale:** `audit_log` tablosunda her DELETE'in tam satır içeriği (`diff->'deleted'`) saklanır; tekil kayıtlar SQL ile geri getirilebilir.
+3. **Kesinleşmiş bordro yanlış kesinleştiyse:** Uygulamadan "Bordroyu Geri Al" (owner + gerekçe) — `revert_payroll` ödemeleri ve taksit düşümlerini tersine çevirir.
 
-#### Yöntem 2B — Harici JSON Yedeğinden Geri Yükleme
-1. **Ayarlar → Hesap** ekranında **"Yedekten Geri Yükle"** butonuna dokunun.
-2. Telefonunuzdaki Dosyalar, Google Drive veya e-postanızdan daha önce indirdiğiniz `tekstil-yedek-*.json` dosyasını seçin.
-3. Uygulama dosyanın şemasını ve bütünlüğünü doğrular, ardından veritabanını geri yükler.
+### S3: Supabase Projesi Kaybı / Veritabanı Bozulması
+`tekstil-yedekler` özel deposundaki günlük şifreli dökümler kullanılır (son 14 gün):
 
-#### Yöntem 2C — Yerel DB'yi Sıfırlayıp Buluttan Temiz Çekme
-Yerel veritabanı tamamen bozulmuşsa:
-1. Uygulamadan çıkış yapın veya uygulama verilerini temizleyin.
-2. Tekrar giriş yaptığınızda Supabase bulutundaki temiz veriler otomatik olarak yerel veritabanına çekilir.
-
----
-
-### Senaryo 3 (S3): Supabase Projesi Kaybı / Veritabanı Bozulması
-
-**Problem:** Supabase projesi silindi, yanlışlıkla tablolar düşürüldü veya bağımsız bir Postgres sunucusuna geçiş yapılmak isteniyor.
-
-Bu senaryoda GitHub Actions tarafından `tekstil-yedekler` deposuna haftalık olarak dökülen `.sql` dosyaları kullanılır.
-
-#### Adım 1: Yedek SQL Dosyasını Alın
-Özel depodaki en güncel yedeği klonlayın veya indirin:
 ```bash
 git clone https://github.com/Muhammed2101812/tekstil-yedekler.git
 cd tekstil-yedekler/yedekler
-ls -lt dump-*.sql | head -n 1
-# Örnek: dump-2026-10-13-0300.sql
+ls -lt dump-*.sql.gpg | head -n 1
+
+# 1) Şifre çöz — GPG parolayı interaktif sorar (terminal geçmişine kaydedilmez;
+#    sorulduğunda BACKUP_PASSPHRASE secret'ının değerini girin)
+gpg --decrypt -o dump.sql dump-2026-XX-XX-XXXX.sql.gpg
+
+# 2) Yeni Supabase projesi oluştur (database.new) ve bağlantı URI'sini al
+
+# 3) Geri yükle
+psql "$NEW_DB_URL" -f dump.sql
+
+# 4) Uygulamayı yeni projeye bağla: .env güncelle
+#    EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY
+#    Sonra yeni build veya eas update ile dağıt.
 ```
 
-#### Adım 2: Yeni Supabase Projesini Hazırlayın
-1. [database.new](https://database.new) adresinden yeni bir Supabase projesi oluşturun.
-2. Proje bağlantı dizesini (Connection String) alın:
-   `Dashboard > Project Settings > Database > Connection string > URI` (veya Transaction Pooler URI).
-
-#### Adım 3: Dökümü Veritabanına Geri Yükleyin
-Döküm dosyası roller, şema ve verileri (auth ve public) tek parça halinde içerir:
-
-```bash
-# Değişkenleri tanımlayın
-NEW_DB_URL="postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
-LATEST_DUMP="dump-2026-10-13-0300.sql"
-
-# psql ile geri yüklemeyi çalıştırın
-psql "$NEW_DB_URL" -f "$LATEST_DUMP"
-```
-
-*Alternatif (Eğer migration yapısı ile adım adım gitmek isterseniz):*
-```bash
-# 1. Önce depodaki migration'ları yeni projeye uygulayın
-npx supabase link --project-ref [YENI-PROJECT-REF]
-npx supabase db push
-
-# 2. Ardından dump dosyasındaki veri bloklarını psql ile yükleyin
-psql "$NEW_DB_URL" -f "$LATEST_DUMP"
-```
-
-#### Adım 4: Mobil Uygulamanın Bağlantısını Güncelleyin
-Proje `.env` dosyasını yeni Supabase URL ve anon key ile güncelleyin:
-```env
-EXPO_PUBLIC_SUPABASE_URL=https://[YENI-PROJECT-REF].supabase.co
-EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
-```
-
-Yeni uygulama derlemesi yapın veya OTA güncellemesi (`eas update`) ile dağıtın. Kullanıcılar eski şifreleri veya Google hesaplarıyla oturum açtıklarında tüm verileri eksiksiz olarak karşılarında bulacaktır.
+> Kayıp penceresi en fazla 1 gündür (günlük cron). Daha uzun geçmiş gerekirse yedek deposunun düzenli olarak dışa kopyalanması önerilir.
 
 ---
 
-## 3. GitHub Actions Yedekleme Kurulumu (Kullanıcı Kontrol Listesi)
+## 4. GitHub Actions Kurulum Kontrol Listesi
 
-Otomatik haftalık yedeklerin çalışması için ana depoya (`Muhammed2101812/tekstil`) iki GitHub secret'ı tanımlanmalıdır:
+Ana depoda (`Muhammed2101812/tekstil`) üç secret tanımlı olmalıdır:
 
-1. **`SUPABASE_DB_URL`**:
-   - Supabase Dashboard → Project Settings → Database → Connection string → URI (Pooler veya Direct).
-   - Şifrenizi içeren tam bağlantı dizesi.
-   - Komut satırından eklemek için:
-     ```bash
-     gh secret set SUPABASE_DB_URL --repo Muhammed2101812/tekstil
-     ```
+1. **`SUPABASE_DB_URL`** — Dashboard → Project Settings → Database → Connection URI.
+2. **`BACKUP_REPO_TOKEN`** — `tekstil-yedekler` deposuna yazma izni olan PAT.
+3. **`BACKUP_PASSPHRASE`** — dump şifreleme parolası. **Yedekten geri getirmek için gereklidir; güvenli bir yerde saklayın.** Kaybedilirse mevcut şifreli yedekler açılamaz.
 
-2. **`BACKUP_REPO_TOKEN`**:
-   - GitHub → Settings → Developer Settings → Personal Access Tokens (Classic veya Fine-grained).
-   - `Muhammed2101812/tekstil-yedekler` deposuna okuma/yazma (repo) izni olan bir token oluşturun.
-   - Komut satırından eklemek için:
-     ```bash
-     gh secret set BACKUP_REPO_TOKEN --repo Muhammed2101812/tekstil
-     ```
-
-3. **Manuel Deneme Çalıştırması:**
-   Secret'lar girildikten sonra workflow'u test etmek için:
-   ```bash
-   gh workflow run yedek.yml --repo Muhammed2101812/tekstil
-   ```
-   Çalışma durumunu izlemek için:
-   ```bash
-   gh run list --workflow=yedek.yml --repo Muhammed2101812/tekstil
-   ```
+Manuel deneme: `gh workflow run yedek.yml --repo Muhammed2101812/tekstil`
 
 ---
 
-## 4. Saklama Politikaları ve Güvenlik Özeti
+## 5. Saklama Politikaları
 
-| Katman | Konum | Saklama Süresi / Adet | Veri Türü | Hassasiyet |
-|---|---|---|---|---|
-| **Yerel Snapshot** | Cihaz (`Documents/backups/`) | Son 7 adet (eskiler silinir) | JSON | Cihazda yerel, şifresiz |
-| **Manuel Dışa Aktarım** | Kullanıcının seçtiği harici alan | Kullanıcı kontrolünde | JSON | Kullanıcı sorumluluğunda |
-| **Supabase Canlı** | AWS / Supabase Cloud | Sürekli canlı (canlı replika) | PostgreSQL RLS | Şifreli, RLS korumalı |
-| **Uzak SQL Dump** | `tekstil-yedekler` (Gizli Depo) | Son 12 döküm (~3 ay) | SQL (DDL + Data) | GitHub Private Repo |
+| Katman | Konum | Saklama | Biçim |
+|---|---|---|---|
+| Canlı veri | Supabase (AWS) | Sürekli | PostgreSQL + RLS |
+| Manuel JSON | Kullanıcının seçtiği yer | Kullanıcı kontrolünde | JSON (geri yüklenebilir) |
+| Günlük dump | `tekstil-yedekler` (gizli depo) | Son **14** döküm, tek commit geçmişi | `.sql.gpg` (AES256) |
 
----
+## 6. Bilinen Sınırlar
 
-## 5. Bilinen Sınırlar
-
-1. **Çalışan Fotoğrafları:** Mobil cihazlarda çekilen veya galeriden seçilen çalışan fotoğrafları cihazın yerel depolama alanında (`file:///data/user/0/...`) saklanır. Supabase Storage entegrasyonu henüz bağlanmadığı için bu fotoğraflar SQL dump veya JSON yedeğine dahil değildir. Cihaz değiştiğinde fotoğrafların tekrar yüklenmesi gerekir.
-2. **Cihaz Kaybında Yerel Snapshot'lar:** Yerel anlık görüntüler telefon bozulduğunda telefonla birlikte kaybolur. Bu nedenle Katman 2 (Haftalık JSON) ve Katman 3-4 (Supabase & GitHub Actions) asıl kurtarma omurgasıdır.
-3. **Eşzamanlı Düzenleme (Last-Write-Wins):** İki farklı cihazda aynı anda aynı kayıt değiştirilirse, sunucuya en son ulaşan güncelleme geçerli olur. Çakışma çözümünde önceki sürüm audit log haricinde saklanmaz.
+1. **Çalışan fotoğrafları** cihaz yerel dosya sisteminde kalır; buluta ve dump'a dahil değildir (Supabase Storage henüz bağlı değil).
+2. **Son-yazan-kazanır:** iki cihazda aynı kayıt aynı anda değişirse sunucuya son ulaşan geçerli olur; önceki sürüm yalnız audit log'da vardır.
+3. **Günlük yedek penceresi:** bulut tarafındaki bir kaza son 24 saate kadar veriyi geri getiremez; kritik dönemlerde manuel JSON yedeği alın.

@@ -3,119 +3,218 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gizlilik Politikası / Privacy Policy — Atölye Defteri</title>
+  <title>Gizlilik Politikası (Privacy Policy) — Atölye Defteri</title>
   <style>
     :root {
-      --primary: #3B5BDB;
-      --bg: #F8F9FA;
-      --card: #FFFFFF;
-      --text: #212529;
-      --muted: #6C757D;
-      --border: #E9ECEF;
+      --primary: #2B6CB0;
+      --primary-dark: #1A365D;
+      --primary-light: #EBF8FF;
+      --accent: #3182CE;
+      --text-main: #2D3748;
+      --text-muted: #718096;
+      --bg-page: #F7FAFC;
+      --bg-card: #FFFFFF;
+      --border-color: #E2E8F0;
+    }
+    * {
+      box-sizing: border-box;
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      line-height: 1.6;
-      color: var(--text);
-      background-color: var(--bg);
+      line-height: 1.7;
+      color: var(--text-main);
+      background-color: var(--bg-page);
       margin: 0;
-      padding: 24px 16px;
+      padding: 32px 16px;
     }
     .container {
-      max-width: 800px;
+      max-width: 860px;
       margin: 0 auto;
-      background: var(--card);
-      padding: 32px;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+      background: var(--bg-card);
+      padding: 40px;
+      border-radius: 16px;
+      border: 1px solid var(--border-color);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+    }
+    .header-box {
+      border-bottom: 2px solid var(--border-color);
+      padding-bottom: 24px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: var(--primary-light);
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
     }
     h1 {
-      color: var(--primary);
-      margin-top: 0;
-      font-size: 26px;
-      border-bottom: 2px solid var(--border);
-      padding-bottom: 12px;
+      color: var(--primary-dark);
+      font-size: 28px;
+      font-weight: 800;
+      margin: 0 0 10px 0;
+      line-height: 1.3;
+    }
+    .meta-info {
+      color: var(--text-muted);
+      font-size: 13.5px;
     }
     h2 {
-      color: #343A40;
+      color: var(--primary-dark);
       font-size: 19px;
-      margin-top: 24px;
-      margin-bottom: 8px;
+      font-weight: 700;
+      margin-top: 32px;
+      margin-bottom: 14px;
+      padding-left: 10px;
+      border-left: 4px solid var(--accent);
     }
-    p, li {
+    h3 {
+      color: var(--text-main);
+      font-size: 16px;
+      font-weight: 600;
+      margin: 18px 0 8px 0;
+    }
+    p {
       font-size: 15px;
-      color: #495057;
+      color: #4A5568;
+      margin: 10px 0;
     }
     ul {
-      padding-left: 20px;
+      margin: 10px 0;
+      padding-left: 22px;
     }
-    .date {
-      color: var(--muted);
-      font-size: 13px;
-      margin-bottom: 20px;
+    li {
+      font-size: 14.5px;
+      color: #4A5568;
+      margin-bottom: 8px;
     }
-    .contact-box {
-      background: #EDF2FF;
-      border-left: 4px solid var(--primary);
-      padding: 16px;
-      border-radius: 4px;
-      margin-top: 24px;
+    strong {
+      color: #1A202C;
+    }
+    .callout {
+      background: #F8FAFC;
+      border: 1px solid #E2E8F0;
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin: 16px 0;
+    }
+    .callout-warning {
+      background: #FFFDF5;
+      border-color: #FEEBC8;
+      border-left: 4px solid #DD6B20;
+    }
+    .contact-card {
+      background: linear-gradient(135deg, #EBF8FF 0%, #F7FAFC 100%);
+      border: 1px solid #BEE3F8;
+      padding: 24px;
+      border-radius: 12px;
+      margin-top: 36px;
+    }
+    .contact-card p {
+      margin: 6px 0;
+    }
+    .contact-card a {
+      color: var(--primary);
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .contact-card a:hover {
+      text-decoration: underline;
+    }
+    .lang-divider {
+      margin: 44px 0;
+      border: 0;
+      border-top: 2px dashed var(--border-color);
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Gizlilik Politikası (Privacy Policy) — Atölye Defteri</h1>
-    <div class="date">Son Güncelleme / Last Updated: 12 Ekim 2026</div>
+  <div class="privacy-container">
+    <div class="header-box">
+      <span class="badge">Google Play ve KVKK Uyumlu</span>
+      <h1>Gizlilik Politikası (Privacy Policy)</h1>
+      <div class="meta-info">
+        <strong>Uygulama:</strong> Atölye Defteri (Paket: <code>com.tekstil.takip</code>)<br>
+        <strong>Geliştirici:</strong> Muhammed (mzsoft)<br>
+        <strong>Son Güncelleme / Yürürlük Tarihi:</strong> 12 Ekim 2026
+      </div>
+    </div>
 
-    <p><strong>Atölye Defteri</strong> mobil uygulaması ("Uygulama"), tekstil ve konfeksiyon atölyelerinin personel puantajı, çalışma saatleri, avans/borç kayıtları ve hakediş hesaplamalarını yönetmelerine yardımcı olmak amacıyla geliştirilmiştir. Kullanıcılarımızın gizliliğine ve kişisel verilerinin güvenliğine azami önem veriyoruz.</p>
+    <p>İşbu Gizlilik Politikası, <strong>Atölye Defteri</strong> mobil uygulamasını ("Uygulama") kullanan işletme sahipleri ve yöneticilerin ("Kullanıcı") kişisel verilerinin ve atölye kayıtlarının nasıl toplandığını, işlendiğini, saklandığını ve korunduğunu açıklamaktadır.</p>
 
-    <h2>1. Toplanan ve İşlenen Veriler</h2>
-    <p>Uygulama aşağıdaki kategorilerdeki verileri işler:</p>
+    <h2>1. Toplanan Veri Kategorileri ve Amaçları</h2>
+    <p>Uygulama, tekstil/konfeksiyon atölye yönetimini sağlamak amacıyla yalnızca aşağıda belirtilen sınırlı verileri işler:</p>
     <ul>
-      <li><strong>Hesap ve Kimlik Bilgileri:</strong> Uygulamaya kaydolurken veya Google ile Giriş yaparken sağlanan e-posta adresi, ad ve soyad bilgileri.</li>
-      <li><strong>Operasyonel Atölye Verileri:</strong> Kullanıcının atölye yönetimi amacıyla kendi girdiği çalışan isimleri, giriş tarihleri, günlük yoklama ve mesai saatleri, avans/ödeme kayıtları ve hesaplanan hakediş tutarları.</li>
-      <li><strong>Cihaz İzinleri ve Yerel Veriler:</strong>
-        <ul>
-          <li><em>Kamera ve Galeri:</em> Yalnızca kullanıcı dilerse çalışan profil fotoğrafı eklemek için kullanılır. Bu fotoğraflar yalnızca cihazın yerel hafızasında saklanır, sunuculara aktarılmaz.</li>
-          <li><em>Bildirimler:</em> Günlük puantaj hatırlatması ve haftalık yedekleme bildirimi göndermek için kullanılır.</li>
-          <li><em>Biyometrik Kimlik Doğrulama:</em> Uygulama kilidini açmak için cihazın yerel parmak izi/Face ID donanımı kullanılır; biyometrik veriler asla cihaz dışına çıkmaz veya kaydedilmez.</li>
-        </ul>
+      <li><strong>Hesap ve Kimlik Bilgileri:</strong> Uygulamaya kaydolurken veya Google ile Giriş yapılırken temin edilen e-posta adresi, ad ve soyad. <em>(Amaç: Kullanıcı doğrulaması, hesap yönetimi ve güvenli bulut senkronizasyonu).</em></li>
+      <li><strong>Atölye Operasyon ve Muhasebe Verileri:</strong> Kullanıcının bizzat sisteme kaydettiği çalışan ad-soyadı, işe giriş tarihi, günlük puantaj (yoklama), mesai saatleri, avans/borç kayıtları ve hesaplanan hakediş/maaş tutarları. <em>(Amaç: Atölye içi personel ve hakediş hesaplama hizmetinin sunulması).</em></li>
+    </ul>
+
+    <h2>2. Cihaz İzinleri ve Hassas Veri Beyanı</h2>
+    <p>Uygulama tarafından talep edilen Android izinleri ve kullanım sınırları şunlardır:</p>
+    <div class="callout">
+      <ul>
+        <li><strong>Kamera ve Medya/Galeri Erişimi (<code>CAMERA</code>, <code>READ_MEDIA_IMAGES</code>):</strong> Yalnızca kullanıcı çalışan kartına isteğe bağlı olarak vesikalık profil fotoğrafı seçmek istediğinde kullanılır. <u>Bu fotoğraflar harici hiçbir sunucuya yüklenmez</u>; yalnızca kullanıcının telefonunun yerel hafızasında saklanır.</li>
+        <li><strong>Biyometrik Kimlik Doğrulama (<code>USE_BIOMETRIC</code>, <code>USE_FINGERPRINT</code>):</strong> Kullanıcının cihazında uygulama kilidini açmasını sağlar. Biyometrik parmak izi/yüz verileri doğrudan telefonun yerel güvenlik çipi tarafından işlenir; uygulama bu verilere erişemez veya dışarı aktaramaz.</li>
+        <li><strong>Bildirimler (<code>POST_NOTIFICATIONS</code>):</strong> Yalnızca kullanıcının ayarladığı günlük akşam yoklama hatırlatmalarını ve haftalık güvenlik yedeği tavsiyelerini iletmek amacıyla kullanılır. Reklam veya pazarlama bildirimi gönderilmez.</li>
+      </ul>
+    </div>
+
+    <h2>3. Veri Güvenliği, Saklama ve Çevrimdışı Mimari</h2>
+    <p>Atölye Defteri, <strong>çevrimdışı öncelikli (offline-first)</strong> prensiple tasarlanmıştır:</p>
+    <ul>
+      <li>Tüm operasyonel veriler öncelikle cihazın güvenli yerel depolama alanında şifreli/korumalı olarak tutulur.</li>
+      <li>Bulut hesabı aktif edildiğinde veriler, <strong>Supabase</strong> altyapısı üzerinde <strong>Satır Düzeyinde Güvenlik (Row Level Security - RLS)</strong> kurallarıyla izole edilir. Her kullanıcının veritabanı alanı yalnızca kendisine özeldir; diğer kullanıcıların veya üçüncü şahısların erişimi kriptografik ve mantıksal olarak engellenmiştir.</li>
+      <li>Tüm veri iletimi modern SSL/TLS (HTTPS) protokolleri üzerinden şifrelenmiş kanallarla gerçekleşir.</li>
+    </ul>
+
+    <h2>4. Üçüncü Taraf Servisler ve SDK Entegrasyonları</h2>
+    <p>Uygulama, temel altyapı ihtiyaçları doğrultusunda yalnızca aşağıdaki güvenilir servis sağlayıcıları kullanır:</p>
+    <ul>
+      <li><strong>Google Identity Services / OAuth 2.0:</strong> Güvenli kullanıcı oturumu açma.</li>
+      <li><strong>Supabase (PostgreSQL Cloud):</strong> Bulut veri yedekleme ve oturum yönetimi.</li>
+      <li><strong>Expo (React Native Platformu):</strong> Uygulama çalışma ortamı ve derleme altyapısı.</li>
+    </ul>
+    <div class="callout callout-warning">
+      <strong>Veri Satışı ve Reklam Politikası:</strong> Uygulamamızda hiçbir üçüncü taraf reklam ağı (AdMob vb.) veya veri komisyoncusu bulunmamaktadır. Kullanıcı ve atölye verileri kesinlikle üçüncü kişilere satılmaz, kiralanmaz ve ticari amaçla devredilmez.
+    </div>
+
+    <h2>5. Veri Saklama Süresi ve Hesap/Veri Silme (Account & Data Deletion)</h2>
+    <p><strong>Google Play Kullanıcı Verileri Politikası</strong> ve KVKK uyarınca kullanıcılarımızın hesap ve veri silme hakları tam güvence altındadır:</p>
+    <ul>
+      <li><strong>Uygulama İçi Silme:</strong> Kullanıcı dilediği an uygulama içerisinden <em>Ayarlar &gt; Hesap</em> ekranına giderek tüm yerel veritabanını temizleyebilir veya yerel anlık görüntüleri silebilir.</li>
+      <li><strong>Kalıcı Hesap ve Bulut Verilerini Silme Talebi:</strong> Hesabınızın, kimlik bilgilerinizin ve buluttaki tüm atölye kayıtlarınızın kalıcı ve geri döndürülemez biçimde silinmesi için aşağıdaki geliştirici e-posta adresimize kayıtlı e-postanızdan talep iletmeniz yeterlidir:
+        <br><strong>Veri Silme Başvuru E-postası:</strong> <a href="mailto:muhammedz191101@gmail.com">muhammedz191101@gmail.com</a>
+        <br><em>(Silme talepleri kimlik teyidinin ardından en geç 48 saat içerisinde yerine getirilir ve veritabanı kayıtları fiziksel olarak imha edilir).</em>
       </li>
     </ul>
 
-    <h2>2. Verilerin Saklanması ve Güvenliği</h2>
-    <p>Atölye Defteri, çevrimdışı öncelikli (offline-first) mimariyle çalışır:</p>
-    <ul>
-      <li>Veriler cihazınızda güvenli yerel depolama alanında saklanır.</li>
-      <li>Kullanıcı oturum açtığında veriler, <strong>Supabase</strong> bulut veritabanında Satır Düzeyinde Güvenlik (Row Level Security - RLS) politikaları ile şifrelenmiş olarak depolanır. Her atölyenin verisi yalnızca yetkili kullanıcıya özeldir ve diğer kullanıcılardan tamamen izoledir.</li>
-    </ul>
+    <h2>6. Çocukların Gizliliği (Children's Privacy)</h2>
+    <p>Atölye Defteri, işletme ve atölye yönetimine yönelik profesyonel bir iş takip aracıdır. Uygulamamız 13 yaşın (veya ilgili yargı alanındaki asgari yasal yaşın) altındaki çocuklara yönelik değildir ve bilerek çocuklara ait kişisel veri toplamamaktadır.</p>
 
-    <h2>3. Üçüncü Taraf Hizmetleri</h2>
-    <p>Uygulama altyapısında aşağıdaki güvenilir servis sağlayıcılar kullanılmaktadır:</p>
-    <ul>
-      <li><strong>Google Sign-In / OAuth:</strong> Güvenli kullanıcı oturumu açma.</li>
-      <li><strong>Supabase:</strong> Güvenli kimlik doğrulama ve veritabanı altyapısı.</li>
-      <li><strong>Expo:</strong> Uygulama çalıştırma ve bildirim mekanizmaları.</li>
-    </ul>
-
-    <h2>4. Veri Paylaşımı ve Satışı</h2>
-    <p>Toplanan hiçbir kişisel veya ticari veri, üçüncü taraflara satılmaz, kiralanmaz veya reklam/pazarlama amacıyla üçüncü taraflarla paylaşılmaz.</p>
-
-    <h2>5. Veri Silme ve Kullanıcı Hakları (Account & Data Deletion)</h2>
-    <p>Kullanıcılar diledikleri zaman hesaplarını ve atölyelerine ait tüm kayıtları silme hakkına sahiptir:</p>
-    <ul>
-      <li>Uygulama içerisinden <em>Ayarlar > Hesap</em> bölümünden yerel verileri silebilirsiniz.</li>
-      <li>Hesabınızın ve bulutta kayıtlı tüm verilerinizin kalıcı olarak silinmesi için aşağıdaki destek e-posta adresimize talepte bulunmanız yeterlidir. Talebiniz en geç 48 saat içinde yerine getirilir.</li>
-    </ul>
-
-    <h2>6. İletişim (Contact Information)</h2>
-    <div class="contact-box">
-      <p>Gizlilik politikamız veya verilerinizle ilgili her türlü soru, görüş ve veri silme talepleriniz için bizimle iletişime geçebilirsiniz:</p>
-      <p><strong>Geliştirici / İletişim:</strong> Muhammed (mzsoft)</p>
-      <p><strong>E-posta:</strong> <a href="mailto:muhammedz191101@gmail.com">muhammedz191101@gmail.com</a></p>
+    <h2>7. İletişim Bilgileri (Developer Contact)</h2>
+    <div class="contact-card">
+      <h3 style="margin-top:0; color:var(--primary-dark);">Geliştirici &amp; Veri Sorumlusu</h3>
+      <p><strong>Geliştirici / Unvan:</strong> Muhammed (mzsoft)</p>
+      <p><strong>Uygulama:</strong> Atölye Defteri (com.tekstil.takip)</p>
+      <p><strong>E-posta &amp; Veri Talepleri:</strong> <a href="mailto:muhammedz191101@gmail.com">muhammedz191101@gmail.com</a></p>
     </div>
+
+    <hr class="lang-divider">
+
+    <!-- English Summary for Google Play Store Reviewers -->
+    <h2>Summary for Google Play Reviewers (English)</h2>
+    <p><strong>Atölye Defteri</strong> is an offline-first mobile ERP tool designed for textile and garment workshop owners to track employee attendance, working hours, and payroll records.</p>
+    <ul>
+      <li><strong>Data Collection:</strong> User email and name for authentication (via Google Sign-in / Supabase). Workshop data (employee names, attendance timestamps, salary amounts) inputted solely by the user for internal payroll calculations.</li>
+      <li><strong>Sensitive Permissions:</strong> Camera &amp; Photo Library access is solely used on-device to attach an optional avatar photo to employee profiles. Photos are stored locally on device and never uploaded to external servers. Biometric authentication is handled locally by the OS. Notifications are used only for scheduled daily attendance reminders.</li>
+      <li><strong>Third Parties:</strong> Google OAuth and Supabase (encrypted database with Row Level Security). No ads, no analytics trackers, no data sales.</li>
+      <li><strong>Account &amp; Data Deletion:</strong> Users can delete their data in-app or request permanent deletion by emailing <code>muhammedz191101@gmail.com</code>. Requests are processed within 48 hours.</li>
+    </ul>
   </div>
 </body>
 </html>

@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   Chip,
+  ConfirmSheet,
   DateField,
   Header,
   Screen,
@@ -41,6 +42,7 @@ export default function AyarTakvim() {
   const orgId = useDataStore((s) => s.orgId);
   const [addOpen, setAddOpen] = useState(false);
   const [menuEvent, setMenuEvent] = useState<CalendarEvent | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -93,14 +95,27 @@ export default function AyarTakvim() {
             label: 'Sil',
             icon: <Trash2 size={20} color={c.danger} />,
             destructive: true,
-            onPress: () => {
-              if (menuEvent) {
-                removeCalendarEvent(menuEvent.id);
-                showToast({ message: 'Özel gün silindi', tone: 'success' });
-              }
-            },
+            onPress: () => setDeleteConfirmOpen(true),
           },
         ]}
+      />
+
+      <ConfirmSheet
+        visible={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        title="Özel Günü Sil"
+        message={`${menuEvent?.title ?? ''} (${menuEvent ? formatTarih(menuEvent.date, { gunAdi: true }) : ''}) silinecek. Devam edilsin mi?`}
+        confirmLabel="Sil"
+        destructive
+        onConfirm={async () => {
+          if (!menuEvent) return;
+          try {
+            await removeCalendarEvent(menuEvent.id);
+            showToast({ message: 'Özel gün silindi', tone: 'success' });
+          } catch (e) {
+            showToast({ message: e instanceof Error ? e.message : 'Silinemedi', tone: 'warning' });
+          }
+        }}
       />
     </Screen>
   );
@@ -119,7 +134,7 @@ function AddEventSheet({ visible, onClose, orgId }: { visible: boolean; onClose:
   const [end, setEnd] = useState('13:00');
   const [timeSheet, setTimeSheet] = useState<null | 'start' | 'end'>(null);
 
-  const save = () => {
+  const save = async () => {
     if (!date) {
       showToast({ message: 'Tarih seçin', tone: 'warning' });
       return;
@@ -147,13 +162,17 @@ function AddEventSheet({ visible, onClose, orgId }: { visible: boolean; onClose:
       employee_ids: [],
       updated_at: new Date().toISOString(),
     };
-    saveCalendarEvent(event);
-    showToast({ message: `${formatTarih(date)} — ${event.title} eklendi`, tone: 'success' });
-    // Sonraki açılış için formu temizle
-    setDate('');
-    setTitle('');
-    setPaid(true);
-    onClose();
+    try {
+      await saveCalendarEvent(event);
+      showToast({ message: `${formatTarih(date)} — ${event.title} eklendi`, tone: 'success' });
+      // Sonraki açılış için formu temizle
+      setDate('');
+      setTitle('');
+      setPaid(true);
+      onClose();
+    } catch (e) {
+      showToast({ message: e instanceof Error ? e.message : 'Kaydedilemedi', tone: 'warning' });
+    }
   };
 
   return (

@@ -28,10 +28,6 @@ export default function Giris() {
   };
 
   const handleGoogle = async () => {
-    if (auth.mode === 'local') {
-      showToast({ message: 'Google ile giriş cihaz modunda kullanılamaz', tone: 'warning' });
-      return;
-    }
     setGoogleBusy(true);
     setError(null);
     const err = await auth.signInWithGoogle();
@@ -46,7 +42,7 @@ export default function Giris() {
     <Screen keyboard>
       <Header title="Giriş Yap" back compact />
       <View style={{ marginTop: spacing.xxl }}>
-        {auth.mode === 'supabase' ? (
+        {auth.isGoogleConfigured ? (
           <>
             <Button
               label={googleBusy ? 'Giriş yapılıyor…' : 'Google ile devam et'}
@@ -62,24 +58,15 @@ export default function Giris() {
               <View style={{ flex: 1, height: 1, backgroundColor: c.border }} />
             </View>
           </>
-        ) : (
-          <View style={{ marginBottom: spacing.md, padding: spacing.sm, backgroundColor: c.surfaceSubtle, borderRadius: 8 }}>
-            <Text style={[type.small, { color: c.textMuted, textAlign: 'center' }]}>
-              Cihaz modu: Google ile giriş için bulut bağlantısı (.env) gereklidir.
-            </Text>
-          </View>
-        )}
+        ) : null}
 
         <TextField label="E-posta" value={email} onChangeText={setEmail} placeholder="ornek@atolye.com" keyboardType="email-address" autoCapitalize="none" />
         <TextField label="Şifre" value={pass} onChangeText={setPass} placeholder="••••••" secure error={error} />
         <Button label={busy ? 'Giriş yapılıyor…' : 'Giriş Yap'} onPress={submit} disabled={busy || googleBusy} />
         {busy ? <ActivityIndicator color={c.primary} style={{ marginTop: spacing.md }} /> : null}
-        <View style={{ marginTop: spacing.lg, alignItems: 'center', gap: spacing.md }}>
+        <View style={{ marginTop: spacing.lg, alignItems: 'center' }}>
           <Link href="/(auth)/sifre-sifirla">
             <Text style={[type.small, { color: c.primary, fontWeight: '600' }]}>Şifremi unuttum</Text>
-          </Link>
-          <Link href="/(auth)/davet">
-            <Text style={[type.small, { color: c.textMuted }]}>Davet kodum var</Text>
           </Link>
         </View>
       </View>

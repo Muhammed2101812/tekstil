@@ -73,10 +73,14 @@ export default function AyarDepartmanlar() {
           label="Departman Ekle"
           icon={<Plus size={18} color={c.onPrimary} />}
           disabled={name.trim().length < 2}
-          onPress={() => {
-            addDepartment(name.trim(), color);
-            setName('');
-            showToast({ message: 'Departman eklendi', tone: 'success' });
+          onPress={async () => {
+            try {
+              await addDepartment(name.trim(), color);
+              setName('');
+              showToast({ message: 'Departman eklendi', tone: 'success' });
+            } catch (e) {
+              showToast({ message: e instanceof Error ? e.message : 'Departman eklenemedi', tone: 'warning' });
+            }
           }}
         />
         <View style={{ height: 20 }} />
@@ -91,10 +95,13 @@ export default function AyarDepartmanlar() {
             label: 'Sil (çalışanlar departmansız kalır)',
             icon: <Trash2 size={20} color={c.danger} />,
             destructive: true,
-            onPress: () => {
-              if (menuId) {
-                removeDepartment(menuId);
+            onPress: async () => {
+              if (!menuId) return;
+              try {
+                await removeDepartment(menuId);
                 showToast({ message: 'Departman silindi', tone: 'success' });
+              } catch (e) {
+                showToast({ message: e instanceof Error ? e.message : 'Departman silinemedi', tone: 'warning' });
               }
             },
           },

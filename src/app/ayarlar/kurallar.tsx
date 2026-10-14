@@ -1,11 +1,12 @@
 import React from 'react';
 import { Text, View } from 'react-native';
-import { Card, Chip, Header, Screen, SegmentedControl } from '../../ui';
+import { Card, Chip, Header, Screen, SegmentedControl, useToast } from '../../ui';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useOrg, useSchedule, useSettings } from '../../data/hooks';
 import { updateOrgSettings } from '../../data/repo';
 import { averageMonthlyHours } from '../../domain/schedule';
 import { formatMoney } from '../../utils/format';
+import type { OrgSettings } from '../../types';
 
 function Row({ title, desc, children }: { title: string; desc: string; children: React.ReactNode }) {
   const { c, type } = useTheme();
@@ -21,11 +22,19 @@ function Row({ title, desc, children }: { title: string; desc: string; children:
 /** Hesaplama kuralları (PLAN 6.9): her seçeneğin altında sade açıklama + canlı örnek */
 export default function AyarKurallar() {
   const { c, type } = useTheme();
+  const { showToast } = useToast();
   const settings = useSettings();
   const org = useOrg();
   const schedule = useSchedule();
   const monthly = averageMonthlyHours(schedule) || 195;
   const gunluk = formatMoney(Math.round((30000 / monthly) * 9 * 100) / 100);
+
+  // Remote-first yazma: hata kullanıcıya toast ile gösterilir
+  const set = (patch: Partial<OrgSettings>) => {
+    updateOrgSettings(patch).catch((e) =>
+      showToast({ message: e instanceof Error ? e.message : 'Kural kaydedilemedi', tone: 'warning' })
+    );
+  };
 
   return (
     <Screen>
@@ -41,7 +50,7 @@ export default function AyarKurallar() {
               { value: 'gercek_ay', label: 'B · O ayın saati' },
             ]}
             value={settings.hourlyWageMethod}
-            onChange={(v) => updateOrgSettings({ hourlyWageMethod: v as never })}
+            onChange={(v) => set({ hourlyWageMethod: v as never })}
           />
           <Text style={[type.small, { color: c.textSecondary, marginTop: 10 }]}>
             Örnek: 30.000 ₺ maaşlı bir işçi 1 gün (9 sa) gelmediğinde kesinti ={' '}
@@ -56,7 +65,7 @@ export default function AyarKurallar() {
                 key={m}
                 label={`Hafta içi ×${String(m).replace('.', ',')}`}
                 selected={settings.overtimeMultiplier === m}
-                onPress={() => updateOrgSettings({ overtimeMultiplier: m })}
+                onPress={() => set({ overtimeMultiplier: m })}
               />
             ))}
             {[2, 2.5, 3].map((m) => (
@@ -64,7 +73,7 @@ export default function AyarKurallar() {
                 key={m}
                 label={`Resmî tatil ×${String(m).replace('.', ',')}`}
                 selected={settings.holidayOvertimeMultiplier === m}
-                onPress={() => updateOrgSettings({ holidayOvertimeMultiplier: m })}
+                onPress={() => set({ holidayOvertimeMultiplier: m })}
               />
             ))}
           </View>
@@ -77,7 +86,7 @@ export default function AyarKurallar() {
               { value: 'kes', label: 'Maaştan kes' },
             ]}
             value={settings.deductLate ? 'kes' : 'kayit'}
-            onChange={(v) => updateOrgSettings({ deductLate: v === 'kes' })}
+            onChange={(v) => set({ deductLate: v === 'kes' })}
           />
         </Row>
 
@@ -88,7 +97,7 @@ export default function AyarKurallar() {
               { value: 'kayit', label: 'Sadece kayıt' },
             ]}
             value={settings.deductEarlyLeave ? 'kes' : 'kayit'}
-            onChange={(v) => updateOrgSettings({ deductEarlyLeave: v === 'kes' })}
+            onChange={(v) => set({ deductEarlyLeave: v === 'kes' })}
           />
         </Row>
 
@@ -99,7 +108,7 @@ export default function AyarKurallar() {
               { value: 'odeme', label: 'Maaştan düşme' },
             ]}
             value={settings.deductSickLeave ? 'kes' : 'odeme'}
-            onChange={(v) => updateOrgSettings({ deductSickLeave: v === 'kes' })}
+            onChange={(v) => set({ deductSickLeave: v === 'kes' })}
           />
           {settings.deductSickLeave ? (
             <View style={{ marginTop: 10 }}>
@@ -109,7 +118,7 @@ export default function AyarKurallar() {
                   { value: 'evet', label: 'İlk 2 günü işveren öder' },
                 ]}
                 value={settings.sickLeaveFirstTwoDaysEmployer ? 'evet' : 'hayir'}
-                onChange={(v) => updateOrgSettings({ sickLeaveFirstTwoDaysEmployer: v === 'evet' })}
+                onChange={(v) => set({ sickLeaveFirstTwoDaysEmployer: v === 'evet' })}
               />
             </View>
           ) : null}
@@ -122,7 +131,7 @@ export default function AyarKurallar() {
               { value: 'evet', label: 'Uygula' },
             ]}
             value={settings.weekRestPenalty ? 'evet' : 'hayir'}
-            onChange={(v) => updateOrgSettings({ weekRestPenalty: v === 'evet' })}
+            onChange={(v) => set({ weekRestPenalty: v === 'evet' })}
           />
         </Row>
 
@@ -135,7 +144,7 @@ export default function AyarKurallar() {
                   key={String(d)}
                   label={d === 'son' ? 'Ayın sonu' : String(d)}
                   selected={settings.paydayOfMonth === val}
-                  onPress={() => updateOrgSettings({ paydayOfMonth: val })}
+                  onPress={() => set({ paydayOfMonth: val })}
                 />
               );
             })}

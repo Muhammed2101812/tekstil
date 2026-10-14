@@ -57,7 +57,9 @@ export default function AyarBildirimler() {
                 label={s}
                 selected={settings.attendanceReminderTime === s}
                 onPress={() => {
-                  updateOrgSettings({ attendanceReminderTime: s });
+                  updateOrgSettings({ attendanceReminderTime: s }).catch((e) =>
+                    showToast({ message: e instanceof Error ? e.message : 'Kaydedilemedi', tone: 'warning' })
+                  );
                   scheduleAttendanceReminder(s)
                     .then((ok) => {
                       if (ok === false) showToast({ message: 'Bildirim izni gerekli', tone: 'warning' });
@@ -76,7 +78,7 @@ export default function AyarBildirimler() {
                 label="Hatırlatmayı Kapat"
                 variant="ghost"
                 onPress={() => {
-                  updateOrgSettings({ attendanceReminderTime: null });
+                  updateOrgSettings({ attendanceReminderTime: null }).catch(() => undefined);
                   scheduleAttendanceReminder(null);
                   showToast({ message: 'Hatırlatma kapatıldı', tone: 'info' });
                 }}

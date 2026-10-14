@@ -38,7 +38,7 @@ export default function Ayarlar() {
     {
       title: 'UYGULAMA',
       items: [
-        { label: 'Yöneticiler', sub: 'Davet kodu', icon: <UserCog size={20} color={c.textSecondary} />, href: '/ayarlar/yoneticiler' },
+        { label: 'Kullanıcılar', sub: 'Kullanıcı oluştur ve yönet', icon: <UserCog size={20} color={c.textSecondary} />, href: '/ayarlar/yoneticiler' },
         { label: 'Güvenlik', sub: 'Uygulama kilidi', icon: <ShieldCheck size={20} color={c.textSecondary} />, href: '/ayarlar/guvenlik' },
         { label: 'Bildirimler', icon: <Bell size={20} color={c.textSecondary} />, href: '/ayarlar/bildirimler' },
         { label: 'Görünüm', sub: 'Açık / koyu tema', icon: <Palette size={20} color={c.textSecondary} />, href: '/ayarlar/gorunum' },

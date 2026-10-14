@@ -1,26 +1,19 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Crypto from 'expo-crypto';
 import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
 import { isSupabaseConfigured, supabase } from './supabase';
-import { uuid } from './id';
+import { useDataStore, useSyncState, emptyDB } from './store';
+import type { OrgMember, Role } from '../types';
 
 /**
- * Kimlik doğrulama.
- * - Supabase modu: e-posta + şifre (Supabase Auth) veya Google ile giriş, oturum güvenli depoda.
- * - Cihaz modu (.env yok): tek cihazda yerel hesap — uygulama anında
- *   denenebilsin diye. Parola SHA-256 ile özetlenir, sunucuya hiçbir şey gitmez.
+ * Kimlik doğrulama (agent.md: uygulama tamamen online):
+ * - Supabase Auth: e-posta + şifre veya Google ile giriş, oturum güvenli depoda.
+ * - Cihaz modu KALDIRILDI: yerel hesap yoktur; .env yoksa uygulama çalışmaz.
  */
 
-interface LocalAccount {
-  userId: string;
-  email: string;
-  passHash: string;
-  name: string;
-}
-
 interface AuthState {
-  mode: 'supabase' | 'local';
   userId: string | null;
   email: string | null;
   name: string | null;
@@ -31,29 +24,52 @@ interface AuthState {
   signInWithGoogle: () => Promise<string | null>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<string | null>;
+  /** Firma sahibinin kullanıcı oluşturması (owner-only; sunucu tarafı doğrular) */
+  createManagedUser: (name: string, email: string, password: string, role: Role) => Promise<string | null>;
+  /** Firma sahibinin kullanıcı şifresini sıfırlaması */
+  resetManagedUserPassword: (userId: string, newPassword: string) => Promise<string | null>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
-const LOCAL_SESSION_KEY = 'tekstil:local-session';
-const LOCAL_ACCOUNTS_KEY = 'tekstil:local-accounts';
+const LEGACY_KEYS = ['tekstil:local-session', 'tekstil:local-accounts'];
 
-async function loadLocalAccounts(): Promise<Record<string, LocalAccount>> {
+/** Edge function hatasından insan-okur mesaj çıkarır ({ error: "…" } gövdesi) */
+async function functionErrorMessage(error: unknown, fallback: string): Promise<string> {
+  const ctx = (error as { context?: unknown }).context;
   try {
-    const raw = await AsyncStorage.getItem(LOCAL_ACCOUNTS_KEY);
-    return raw ? JSON.parse(raw) : {};
+    const body = await (ctx as Response | undefined)?.json();
+    if (body && typeof body.error === 'string') return body.error;
   } catch {
-    return {};
+    // gövde okunamadı — varsayılan mesaja düş
   }
+  return fallback;
 }
 
-async function saveLocalAccounts(accounts: Record<string, LocalAccount>) {
-  await AsyncStorage.setItem(LOCAL_ACCOUNTS_KEY, JSON.stringify(accounts));
-}
+export function extractOAuthParams(url: string): Record<string, string> {
+  const params: Record<string, string> = {};
+  const hashIdx = url.indexOf('#');
+  const queryIdx = url.indexOf('?');
 
-async function hashPassword(password: string): Promise<string> {
-  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `tekstil:${password}`, {
-    encoding: Crypto.CryptoEncoding.HEX,
-  });
+  if (hashIdx !== -1) {
+    const hash = url.substring(hashIdx + 1);
+    const searchParams = new URLSearchParams(hash);
+    searchParams.forEach((val, key) => {
+      params[key] = val;
+    });
+  }
+
+  if (queryIdx !== -1) {
+    const end = hashIdx !== -1 && hashIdx > queryIdx ? hashIdx : url.length;
+    const query = url.substring(queryIdx + 1, end);
+    const searchParams = new URLSearchParams(query);
+    searchParams.forEach((val, key) => {
+      if (!params[key]) {
+        params[key] = val;
+      }
+    });
+  }
+
+  return params;
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -73,26 +89,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let sub: { data: { subscription: { unsubscribe: () => void } } } | null = null;
     (async () => {
-      if (isSupabaseConfigured) {
-        const { data } = await supabase.auth.getSession();
-        const user = data.session?.user ?? null;
-        setUserId(user?.id ?? null);
-        setEmail(user?.email ?? null);
-        setName(extractName(user));
-        sub = supabase.auth.onAuthStateChange((_event, session) => {
-          setUserId(session?.user?.id ?? null);
-          setEmail(session?.user?.email ?? null);
-          setName(extractName(session?.user ?? null));
-        });
-      } else {
-        const raw = await AsyncStorage.getItem(LOCAL_SESSION_KEY);
-        if (raw) {
-          const s = JSON.parse(raw) as { userId: string; email: string; name: string };
-          setUserId(s.userId);
-          setEmail(s.email);
-          setName(s.name);
-        }
-      }
+      // Eski cihaz-modu kalıntılarını temizle (tek seferlik)
+      await AsyncStorage.multiRemove(LEGACY_KEYS).catch(() => undefined);
+
+      const { data } = await supabase.auth.getSession();
+      const user = data.session?.user ?? null;
+      setUserId(user?.id ?? null);
+      setEmail(user?.email ?? null);
+      setName(extractName(user));
+      sub = supabase.auth.onAuthStateChange((_event, session) => {
+        setUserId(session?.user?.id ?? null);
+        setEmail(session?.user?.email ?? null);
+        setName(extractName(session?.user ?? null));
+      });
       setReady(true);
     })();
     return () => sub?.data.subscription.unsubscribe();
@@ -100,155 +109,154 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<AuthState>(
     () => ({
-      mode: isSupabaseConfigured ? 'supabase' : 'local',
       userId,
       email,
       name,
       ready,
       isGoogleConfigured,
       async signUp(mail, password, ad) {
-        if (isSupabaseConfigured) {
-          const { error } = await supabase.auth.signUp({
-            email: mail,
-            password,
-            options: { data: { name: ad } },
-          });
-          return error ? error.message : null;
-        }
-        const key = mail.toLowerCase();
-        const accounts = await loadLocalAccounts();
-        if (accounts[key]) return 'Bu e-posta ile zaten hesap var, giriş yapın.';
-        const account: LocalAccount = {
-          userId: uuid(),
-          email: key,
-          passHash: await hashPassword(password),
-          name: ad,
-        };
-        accounts[key] = account;
-        await saveLocalAccounts(accounts);
-        await AsyncStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify({ userId: account.userId, email: key, name: ad }));
-        setUserId(account.userId);
-        setEmail(key);
-        setName(ad);
-        return null;
+        const { error } = await supabase.auth.signUp({
+          email: mail,
+          password,
+          options: { data: { name: ad } },
+        });
+        return error ? error.message : null;
       },
       async signIn(mail, password) {
-        if (isSupabaseConfigured) {
-          const { error } = await supabase.auth.signInWithPassword({ email: mail, password });
-          return error ? 'E-posta veya şifre hatalı.' : null;
-        }
-        const accounts = await loadLocalAccounts();
-        const account = accounts[mail.toLowerCase()];
-        if (!account || account.passHash !== (await hashPassword(password))) {
-          return 'E-posta veya şifre hatalı.';
-        }
-        await AsyncStorage.setItem(
-          LOCAL_SESSION_KEY,
-          JSON.stringify({ userId: account.userId, email: account.email, name: account.name })
-        );
-        setUserId(account.userId);
-        setEmail(account.email);
-        setName(account.name);
-        return null;
+        const { error } = await supabase.auth.signInWithPassword({ email: mail, password });
+        return error ? 'E-posta veya şifre hatalı.' : null;
       },
       async signInWithGoogle() {
-        if (!isSupabaseConfigured) {
-          return 'Google ile giriş cihaz modunda kullanılamaz. Bulut senkronu için .env yapılandırması gereklidir.';
-        }
-        const clientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim();
-        if (!clientId) {
-          return 'Google ile giriş henüz yapılandırılmamış (EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID eksik).';
-        }
-
         try {
-          const rawNonce = await Crypto.digestStringAsync(
-            Crypto.CryptoDigestAlgorithm.SHA256,
-            `${Date.now()}-${Math.random()}-${Math.random()}`,
-            { encoding: Crypto.CryptoEncoding.HEX }
-          );
-          const hashedNonce = await Crypto.digestStringAsync(
-            Crypto.CryptoDigestAlgorithm.SHA256,
-            rawNonce,
-            { encoding: Crypto.CryptoEncoding.HEX }
-          );
-
-          const redirectUri = AuthSession.makeRedirectUri({
-            preferLocalhost: true,
+          const redirectTo = AuthSession.makeRedirectUri({
+            scheme: 'tekstil',
+            path: 'auth',
           });
 
-          const discovery: AuthSession.DiscoveryDocument = {
-            authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-            tokenEndpoint: 'https://oauth2.googleapis.com/token',
-            revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
-            userInfoEndpoint: 'https://openidconnect.googleapis.com/v1/userinfo',
-          };
-
-          const request = new AuthSession.AuthRequest({
-            clientId,
-            scopes: ['openid', 'profile', 'email'],
-            responseType: AuthSession.ResponseType.IdToken,
-            redirectUri,
-            extraParams: {
-              nonce: hashedNonce,
-            },
-          });
-
-          const result = await request.promptAsync(discovery);
-
-          if (result.type !== 'success') {
-            if (result.type === 'cancel' || result.type === 'dismiss') {
-              return null; // Kullanıcı iptal etti
-            }
-            return 'Google ile giriş tamamlanamadı veya pencere kapatıldı.';
+          if (Platform.OS === 'web') {
+            const { error } = await supabase.auth.signInWithOAuth({
+              provider: 'google',
+              options: {
+                redirectTo,
+              },
+            });
+            return error ? error.message : null;
           }
 
-          const idToken = result.params?.id_token;
-          if (!idToken) {
-            return 'Google kimlik belirteci (id_token) alınamadı.';
-          }
-
-          const { data, error } = await supabase.auth.signInWithIdToken({
+          const { data, error } = await supabase.auth.signInWithOAuth({
             provider: 'google',
-            token: idToken,
-            nonce: rawNonce,
+            options: {
+              redirectTo,
+              skipBrowserRedirect: true,
+            },
           });
 
           if (error) {
             return error.message;
           }
 
-          if (data.user) {
-            setUserId(data.user.id);
-            setEmail(data.user.email ?? null);
-            setName(extractName(data.user));
+          if (!data?.url) {
+            return 'Google giriş bağlantısı oluşturulamadı.';
           }
 
-          return null;
+          const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+
+          if (result.type !== 'success' || !result.url) {
+            if (result.type === 'cancel' || result.type === 'dismiss') {
+              return null; // Kullanıcı iptal etti
+            }
+            return 'Google ile giriş tamamlanamadı veya pencere kapatıldı.';
+          }
+
+          const params = extractOAuthParams(result.url);
+
+          if (params.error || params.error_description) {
+            return params.error_description || params.error;
+          }
+
+          if (params.code) {
+            const { data: codeData, error: codeErr } = await supabase.auth.exchangeCodeForSession(params.code);
+            if (codeErr) return codeErr.message;
+            if (codeData.user) {
+              setUserId(codeData.user.id);
+              setEmail(codeData.user.email ?? null);
+              setName(extractName(codeData.user));
+            }
+            return null;
+          }
+
+          if (params.access_token && params.refresh_token) {
+            const { data: sessionData, error: sessionErr } = await supabase.auth.setSession({
+              access_token: params.access_token,
+              refresh_token: params.refresh_token,
+            });
+            if (sessionErr) return sessionErr.message;
+            if (sessionData.user) {
+              setUserId(sessionData.user.id);
+              setEmail(sessionData.user.email ?? null);
+              setName(extractName(sessionData.user));
+            }
+            return null;
+          }
+
+          // Arka planda oturumun kurulup kurulmadığını kontrol et
+          const { data: checkData } = await supabase.auth.getSession();
+          if (checkData.session?.user) {
+            setUserId(checkData.session.user.id);
+            setEmail(checkData.session.user.email ?? null);
+            setName(extractName(checkData.session.user));
+            return null;
+          }
+
+          return 'Google oturumu doğrulanamadı.';
         } catch (err) {
           return err instanceof Error ? err.message : 'Google ile giriş sırasında bir hata oluştu.';
         }
       },
       async signOut() {
-        if (isSupabaseConfigured) {
-          await supabase.auth.signOut();
-        }
+        await supabase.auth.signOut();
         await AsyncStorage.removeItem('tekstil:last-sync');
-        await AsyncStorage.removeItem(LOCAL_SESSION_KEY);
-        const { useDataStore } = await import('./store');
-        const { emptyDB } = await import('./persist');
-        useDataStore.getState().replaceDB(emptyDB());
-        useDataStore.getState().setOrg(null);
-        useDataStore.getState().setUserId('anon');
+        // Bellek içi store ve senkron bayraklarını sıfırla (agent.md: çıkış temizliği)
+        const st = useDataStore.getState();
+        st.replaceDB(emptyDB());
+        st.setOrg(null);
+        st.setUserId('anon');
+        useSyncState.getState().reset();
         setUserId(null);
         setEmail(null);
         setName(null);
       },
       async resetPassword(mail) {
-        if (isSupabaseConfigured) {
-          const { error } = await supabase.auth.resetPasswordForEmail(mail);
-          return error ? error.message : null;
+        const { error } = await supabase.auth.resetPasswordForEmail(mail);
+        return error ? error.message : null;
+      },
+      async createManagedUser(ad, mail, password, role) {
+        const key = mail.trim().toLowerCase();
+        const cleanName = ad.trim();
+        const { data, error } = await supabase.functions.invoke<{ userId: string; member: OrgMember }>(
+          'admin-create-user',
+          { method: 'POST', body: { name: cleanName, email: key, password, role } }
+        );
+        if (error) {
+          return await functionErrorMessage(error, 'Kullanıcı oluşturulamadı.');
         }
-        return 'Cihaz modunda şifre sıfırlama yok. Parolanızı unuttuysanız uygulama verisini temizleyin.';
+        // Sunucudaki satırı olduğu gibi yansıt (id tutarlılığı; pull çakışma yapmaz)
+        const member = data?.member;
+        if (member) {
+          useDataStore.getState().upsert('org_members', member);
+        }
+        return null;
+      },
+      async resetManagedUserPassword(targetUserId, newPassword) {
+        if (newPassword.length < 6) return 'Şifre en az 6 karakter olmalı.';
+        const { error } = await supabase.functions.invoke('admin-set-password', {
+          method: 'POST',
+          body: { userId: targetUserId, newPassword },
+        });
+        if (error) {
+          return await functionErrorMessage(error, 'Şifre güncellenemedi.');
+        }
+        return null;
       },
     }),
     [userId, email, name, ready, isGoogleConfigured]

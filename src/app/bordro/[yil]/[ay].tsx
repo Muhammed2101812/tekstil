@@ -25,7 +25,6 @@ import { PayrollAdjustments } from '../../../domain/payroll';
 import { finalizePayroll, revertPayroll, ensurePayroll, recordSalaryPayment, giveDebt } from '../../../data/repo';
 import { ayAdi, formatMoney, formatMoneyShort } from '../../../utils/format';
 import { hapticSuccess } from '../../../utils/haptics';
-import { isSupabaseConfigured } from '../../../data/supabase';
 
 /** Maaş / Bordro ay ekranı (PLAN 6.7): taslak canlı hesap, kesinleştir, ödeme */
 export default function BordroAy() {
@@ -300,11 +299,9 @@ export default function BordroAy() {
                 disabled={busy || items.length === 0}
                 onPress={() => setFinalConfirm(true)}
               />
-              {isSupabaseConfigured ? (
-                <Text style={[type.small, { color: c.textMuted, textAlign: 'center' }]}>
-                  Kesinleştirme internet ister; taksitler anında borçlardan düşer.
-                </Text>
-              ) : null}
+              <Text style={[type.small, { color: c.textMuted, textAlign: 'center' }]}>
+                Kesinleştirme internet ister; taksitler anında borçlardan düşer.
+              </Text>
             </>
           ) : (
             <>
