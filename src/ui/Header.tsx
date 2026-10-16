@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View, Pressable, StyleProp, ViewStyle, Platform, StatusBar } from 'react-native';
+import { StyleSheet, Text, View, Pressable, StyleProp, ViewStyle, Platform } from 'react-native';
 import { router } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -40,10 +40,8 @@ export function Header({
     }
   };
 
-  const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
   const topInset = Math.max(
     insets.top,
-    statusBarHeight,
     Platform.OS === 'ios' ? 44 : 28
   );
 

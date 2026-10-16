@@ -51,7 +51,7 @@ export function BottomSheet({
   const maxH = Dimensions.get('window').height * maxHeightRatio;
 
   return (
-    <Modal transparent visible animationType="none" onRequestClose={close} statusBarTranslucent>
+    <Modal transparent visible animationType="none" onRequestClose={close}>
       <View style={styles.fill}>
         <Animated.View style={[styles.overlay, { backgroundColor: c.overlay, opacity: fade }]}>
           <Pressable style={styles.fill} onPress={close} accessibilityLabel="Kapat" />

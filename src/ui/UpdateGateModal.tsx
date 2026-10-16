@@ -39,7 +39,6 @@ export function UpdateGateModal({ visible, config }: UpdateGateModalProps) {
       visible={visible}
       transparent
       animationType="fade"
-      statusBarTranslucent
       onRequestClose={() => {
         // Kapatılamaz
       }}

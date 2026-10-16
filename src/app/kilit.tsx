@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { Delete, Fingerprint, Lock } from 'lucide-react-native';
@@ -12,8 +12,7 @@ import { hapticLight, hapticSuccess, hapticWarning } from '../utils/haptics';
 export default function Kilit() {
   const { c, type } = useTheme();
   const insets = useSafeAreaInsets();
-  const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
-  const topInset = Math.max(insets.top, statusBarHeight, Platform.OS === 'ios' ? 44 : 28);
+  const topInset = Math.max(insets.top, Platform.OS === 'ios' ? 44 : 28);
   const pinHash = useThemeStore((s) => s.appLockPinHash);
   const registerPinAttempt = useThemeStore((s) => s.registerPinAttempt);
   const pinLockUntil = useThemeStore((s) => s.pinLockUntil);

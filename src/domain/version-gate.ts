@@ -1,4 +1,4 @@
-import { Linking, Platform } from 'react-native';
+import { Linking } from 'react-native';
 import Constants from 'expo-constants';
 import * as Application from 'expo-application';
 import { supabase } from '../data/supabase';
@@ -21,11 +21,9 @@ export const DEFAULT_STORE_URL =
  * 3) Geri dönüş (fallback): 5 (0006-0007 online sürümü)
  */
 export function getCurrentVersionCode(): number {
-  if (Platform.OS === 'android') {
-    const nativeBuild = Application.nativeBuildVersion;
-    if (nativeBuild && !Number.isNaN(Number(nativeBuild))) {
-      return Number(nativeBuild);
-    }
+  const nativeBuild = Application.nativeBuildVersion;
+  if (nativeBuild && !Number.isNaN(Number(nativeBuild))) {
+    return Number(nativeBuild);
   }
 
   const manifestVersion = Constants.expoConfig?.android?.versionCode;
@@ -33,7 +31,7 @@ export function getCurrentVersionCode(): number {
     return manifestVersion;
   }
 
-  return 5;
+  return 6;
 }
 
 export interface VersionCheckResult {

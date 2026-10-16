@@ -4,7 +4,6 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -280,8 +279,7 @@ export default function Bugun() {
     { month: 'long' }
   );
 
-  const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
-  const topInset = Math.max(insets.top, statusBarHeight, Platform.OS === 'ios' ? 44 : 28);
+  const topInset = Math.max(insets.top, Platform.OS === 'ios' ? 44 : 28);
 
   return (
     <Screen

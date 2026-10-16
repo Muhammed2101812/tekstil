@@ -2,8 +2,8 @@
   "expo": {
     "name": "Atölye Defteri",
     "slug": "tekstil",
-    "version": "1.0.5",
-    "orientation": "portrait",
+    "version": "1.0.6",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "scheme": "tekstil",
@@ -17,7 +17,7 @@
     },
     "android": {
       "package": "com.tekstil.takip",
-      "versionCode": 5,
+      "versionCode": 6,
       "adaptiveIcon": {
         "backgroundColor": "#2D54CD",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -61,7 +61,16 @@
           "faceIDPermission": "Uygulama kilidi için Face ID kullanılır."
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {
