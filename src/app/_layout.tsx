@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Text, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import * as WebBrowser from 'expo-web-browser';
@@ -24,6 +24,8 @@ import { useDataStore, useSyncState } from '../data/store';
 import { isSupabaseConfigured } from '../data/supabase';
 import { useThemeStore } from '../state/settings';
 import { setupNotifications } from '../utils/notifications';
+import { UpdateGateModal } from '../ui';
+import { checkAppVersion, AppVersionConfig } from '../domain/version-gate';
 
 WebBrowser.maybeCompleteAuthSession();
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
@@ -79,6 +81,32 @@ function RootNavigator() {
   const initialSyncError = useSyncState((s) => s.initialSyncError);
   const triggerSync = useSyncState((s) => s.triggerSync);
   const lockEnabled = useThemeStore((s) => s.appLockEnabled);
+
+  // Zorunlu güncelleme kontrolü (Minimum Version Gate)
+  const [updateConfig, setUpdateConfig] = useState<AppVersionConfig | null>(null);
+  const [needsUpdate, setNeedsUpdate] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const runCheck = async () => {
+      const res = await checkAppVersion();
+      if (!mounted) return;
+      if (res.needsUpdate && res.config) {
+        setUpdateConfig(res.config);
+        setNeedsUpdate(true);
+      } else {
+        setNeedsUpdate(false);
+      }
+    };
+    runCheck();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') runCheck();
+    });
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, []);
 
   // Otomatik kilit: arka plana geçince kilitlenir (PLAN 6.9 Güvenlik)
   const lockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -170,6 +198,16 @@ function RootNavigator() {
     );
   }
 
+  // Zorunlu güncelleme kontrolü: sürüm eski ise kullanıcıyı kilitler
+  if (needsUpdate && updateConfig) {
+    return (
+      <View style={{ flex: 1, backgroundColor: c.background }}>
+        <StatusBar style={dark ? 'light' : 'dark'} />
+        <UpdateGateModal visible={needsUpdate} config={updateConfig} />
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
       <StatusBar style={dark ? 'light' : 'dark'} />
@@ -190,6 +228,7 @@ function RootNavigator() {
         <Stack.Screen name="ek-calisma" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         <Stack.Screen name="uretim" options={{ presentation: 'card', animation: 'slide_from_right' }} />
       </Stack>
+      <UpdateGateModal visible={needsUpdate} config={updateConfig} />
     </View>
   );
 }

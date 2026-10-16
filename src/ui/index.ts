@@ -20,3 +20,4 @@ export { IconButton } from './IconButton';
 export { StatCard, StatGrid } from './StatCard';
 export { AtelierLogo } from './AtelierLogo';
 export { GoogleIcon } from './GoogleIcon';
+export { UpdateGateModal } from './UpdateGateModal';
