@@ -16,24 +16,37 @@ export function minutesToTime(minutes: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-/** Bir saat aralığı içinde kalan ücretsiz mola dakikaları (yarım gün desteği) */
+/** Saat aralığını dakikaya çevirir; gece yarısını saran aralıklarda (örn. 22:00–06:00) bitişi ertesi güne taşır */
+function intervalMinutes(startStr: string, endStr: string): { s: number; e: number } {
+  const s = timeToMinutes(startStr);
+  let e = timeToMinutes(endStr);
+  if (e < s) e += 1440;
+  return { s, e };
+}
+
+/** Bir saat aralığı içinde kalan ücretsiz mola dakikaları (yarım gün ve gece vardiyası desteği) */
 export function unpaidBreakMinutesWithin(startStr: string, endStr: string, breaks: BreakTime[]): number {
-  const start = timeToMinutes(startStr);
-  const end = timeToMinutes(endStr);
+  const win = intervalMinutes(startStr, endStr);
   return breaks.reduce((sum, b) => {
     if (b.paid) return sum;
-    const bs = timeToMinutes(b.start);
-    const be = timeToMinutes(b.end);
-    const overlap = Math.min(end, be) - Math.max(start, bs);
-    return sum + Math.max(0, overlap);
+    const { s: bs, e: be } = intervalMinutes(b.start, b.end);
+    if (be === bs) return sum;
+    // Geceyi saran vardiyalarda mola pencerenin öncesinde/sonrasında da olabilir
+    const overlap = Math.max(
+      0,
+      Math.min(win.e, be) - Math.max(win.s, bs),
+      Math.min(win.e, be + 1440) - Math.max(win.s, bs + 1440),
+      Math.min(win.e, be - 1440) - Math.max(win.s, bs - 1440)
+    );
+    return sum + overlap;
   }, 0);
 }
 
-/** startTime–endTime arasının ücretsiz molalar düşülmüş net saat miktarı */
+/** startTime–endTime arasının ücretsiz molalar düşülmüş net saat miktarı (gece yarısını saran aralıklar dahil) */
 export function netHoursBetween(startStr: string, endStr: string, breaks: BreakTime[]): number {
-  const gross = timeToMinutes(endStr) - timeToMinutes(startStr);
+  const { s, e } = intervalMinutes(startStr, endStr);
   const unpaid = unpaidBreakMinutesWithin(startStr, endStr, breaks);
-  return Math.max(0, gross - unpaid) / 60;
+  return Math.max(0, e - s - unpaid) / 60;
 }
 
 export function dayNetHours(day: ScheduleDay): number {
@@ -151,7 +164,8 @@ export function getDayPlan(dateStr: string, schedule: ScheduleDay[], events: Cal
     const start = yarimGun.start_time ?? day?.start_time ?? '08:00';
     const end = yarimGun.end_time ?? day?.end_time ?? '13:00';
     const h = netHoursBetween(start, end, day?.breaks ?? []);
-    return planFor(dateStr, 'yarim_gun', h, true, null, yarimGun.title, yarimGun, timeToMinutes(start), timeToMinutes(end));
+    // Hafta sonuna yanlışlıkla eklenen yarım gün, o günü kesintiye açık iş gününe çevirmez
+    return planFor(dateStr, 'yarim_gun', h, day?.is_workday ?? true, null, yarimGun.title, yarimGun, timeToMinutes(start), timeToMinutes(end));
   }
 
   if (ekCalisma) {

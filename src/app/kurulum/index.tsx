@@ -196,13 +196,17 @@ export default function Kurulum() {
         await addDepartment(name, preset?.color ?? '#3B5BDB');
       }
       if (!skipPeople) {
+        // Seçilen ilk departman yeni çalışanlara varsayılan atanır; kişi bazında
+        // düzenleme personel ekranından yapılabilir.
+        const depAfterCreate = useDataStore.getState().db.departments.filter((d) => d.org_id === org);
+        const defaultDepId = selectedDeps.length > 0 ? (depAfterCreate.find((d) => d.name === selectedDeps[0])?.id ?? null) : null;
         for (const p of people) {
           if (p.name.trim().length > 1 && Number(p.salary.replace(',', '.')) > 0) {
             await addEmployee({
               full_name: p.name.trim(),
               salary: Number(p.salary.replace(',', '.')),
               start_date: todayISO(),
-              department_id: null,
+              department_id: defaultDepId,
             });
           }
         }

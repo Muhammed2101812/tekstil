@@ -161,7 +161,7 @@ export default function Raporlar() {
             const att = monthInfo.attendance.filter((a) => a.employee_id === emp.id);
             return {
               name: emp.full_name,
-              absent: att.filter((a) => a.status === 'gelmedi' || a.status === 'ucretsiz_izin').length,
+              absent: att.filter((a) => a.status === 'gelmedi' || a.status === 'ucretsiz_izin' || a.status === 'issiz_gunu').length,
               late: att.filter((a) => a.status === 'gec_geldi').length,
               early: att.filter((a) => a.status === 'erken_cikti').length,
             };
@@ -192,6 +192,16 @@ export default function Raporlar() {
         const names: Record<string, string> = {};
         for (const d of departments) names[d.id] = d.name;
         return import('../../export/excel').then((m) => m.sharePersonelExcel(employees, names));
+      },
+    },
+    {
+      id: 'gecici-excel',
+      title: 'Geçici / Günlük Çalışanlar',
+      sub: `Excel · ${ayBasligi} kayıtları`,
+      run: async () => {
+        const m = await import('../../export/excel');
+        const monthLogs = (db.temp_work_logs ?? []).filter((l) => l.date.startsWith(ym));
+        await m.shareTempWorkersExcel(monthLogs, `gecici-calisanlar-${ayBasligi.replace(/\s+/g, '-')}`);
       },
     },
     {

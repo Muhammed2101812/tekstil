@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { Button, Card, EmptyState, Header, MoneyField, Screen, SectionHeader, TextField, useToast , SegmentedControl } from '../../../ui';
-import { FileText } from 'lucide-react-native';
+import { FileText, Send } from 'lucide-react-native';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { useDataStore } from '../../../data/store';
 import { computePayrollForMonth } from '../../../features/bordro/compute';
 import { savePayrollItems } from '../../../data/repo';
-import { formatMoney } from '../../../utils/format';
+import { ayAdi, formatMoney } from '../../../utils/format';
 
 /**
  * Bordro kalem detayı (PLAN 6.7): "Nasıl hesaplandı?" satır satır, sade dille.
@@ -111,6 +111,26 @@ export default function BordroKalem() {
     }
   };
 
+  const org = db.organizations.find((o) => o.id === orgId);
+
+  const sendPusula = async () => {
+    if (!item || !org) return;
+    try {
+      const { sharePusulaPdf } = await import('../../../export/pdf');
+      await sharePusulaPdf(item, { name: org.name, logoUrl: org.logo_url }, `${ayAdi(month)} ${year}`);
+    } catch (e) {
+      showToast({ message: e instanceof Error ? e.message : 'Pusula hazırlanamadı', tone: 'warning' });
+    }
+  };
+
+  const openWhatsAppPusula = () => {
+    if (!item) return;
+    const tel = db.employees.find((e) => e.id === item.employee_id)?.phone?.replace(/\D/g, '');
+    const metin = `${item.employee_name}, ${ayAdi(month)} ${year} bordronuz hazır: net ödeme ${formatMoney(item.net_payable, { kurus: true })} ₺. Detaylı pusulayı PDF olarak gönderiyorum. İyi çalışmalar!${org?.name ? ` — ${org.name}` : ''}`;
+    const url = tel ? `https://wa.me/${tel}?text=${encodeURIComponent(metin)}` : `https://wa.me/?text=${encodeURIComponent(metin)}`;
+    Linking.openURL(url).catch(() => showToast({ message: 'WhatsApp açılamadı', tone: 'warning' }));
+  };
+
   if (loaded && !item) {
     return (
       <Screen>
@@ -170,6 +190,15 @@ export default function BordroKalem() {
                 </Text>
               </Card>
             ) : null}
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+              <View style={{ flex: 1 }}>
+                <Button label="Pusulayı Gönder (PDF)" variant="secondary" icon={<Send size={16} color={c.text} />} onPress={sendPusula} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Button label="WhatsApp'ta Aç" variant="secondary" onPress={openWhatsAppPusula} />
+              </View>
+            </View>
 
             {!finalized ? (
               <>

@@ -72,7 +72,18 @@ export function TimeSheet({
   onDone: (time: string) => void;
 }) {
   const { c, type } = useTheme();
-  const [picked, setPicked] = useState(value);
+
+  // Resync the pick when the sheet (re)opens or the incoming value changes:
+  // this component stays mounted, so useState(value) alone would keep showing
+  // a stale time from the previous open. Standard render-time adjustment
+  // pattern (no effect).
+  const [pick, setPick] = useState({ visible, value, picked: value });
+  let picked = pick.picked;
+  if (pick.visible !== visible || pick.value !== value) {
+    picked = visible ? value : pick.picked;
+    setPick({ visible, value, picked });
+  }
+  const setPicked = (t: string) => setPick((p) => ({ ...p, picked: t }));
 
   const fmt = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
   const parse = (t: string) => {

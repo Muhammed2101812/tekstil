@@ -18,7 +18,7 @@ export const DEFAULT_STORE_URL =
  * Cihazın mevcut derleme numarasını (versionCode) döndürür.
  * 1) Native build runtime'da Application.nativeBuildVersion (en güvenilir)
  * 2) Expo manifest içindeki android.versionCode
- * 3) Geri dönüş (fallback): 5 (0006-0007 online sürümü)
+ * 3) Geri dönüş (fallback): 6
  */
 export function getCurrentVersionCode(): number {
   const nativeBuild = Application.nativeBuildVersion;

@@ -56,3 +56,6 @@ dist_web/
 *.bak
 test_*.png
 raw_screen_*.png
+
+# Play Console prosedür çıktıları
+data_safety_export*.csv

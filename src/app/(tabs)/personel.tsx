@@ -2,10 +2,10 @@ import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { router } from 'expo-router';
-import { UserPlus, Users } from 'lucide-react-native';
+import { UserCheck, UserPlus, Users } from 'lucide-react-native';
 import { Avatar, Badge, Button, Chip, EmptyState, Header, IconButton, SegmentedControl, TextField } from '../../ui';
 import { useTheme } from '../../theme/ThemeProvider';
-import { useDebts, useDebtPayments, useDepartments, useEmployees } from '../../data/hooks';
+import { useDebts, useDebtPayments, useDepartments, useEmployees, useTempWorkLogs } from '../../data/hooks';
 import { calculateDebtBalance } from '../../domain/debts';
 import { todayISO } from '../../domain/schedule';
 import { formatMoney, formatTarih } from '../../utils/format';
@@ -18,6 +18,7 @@ export default function Personel() {
   const [tab, setTab] = useState<'aktif' | 'ayrilan'>('aktif');
 
   const employees = useEmployees({ active: tab === 'aktif' });
+  const tempLogs = useTempWorkLogs();
   const departments = useDepartments();
   const debts = useDebts();
   const payments = useDebtPayments();
@@ -47,15 +48,50 @@ export default function Personel() {
       <Header
         title="Personel"
         right={
-          <IconButton
-            icon={<UserPlus size={20} color={c.accent} strokeWidth={2.2} />}
-            tone="accent"
-            label="Çalışan Ekle"
-            onPress={() => router.push('/personel/duzenle')}
-          />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <IconButton
+              icon={<UserCheck size={20} color={c.primary} strokeWidth={2.2} />}
+              tone="primary"
+              label="Geçici / Günlük Çalışanlar"
+              onPress={() => router.push('/gecici-calisan' as never)}
+            />
+            <IconButton
+              icon={<UserPlus size={20} color={c.accent} strokeWidth={2.2} />}
+              tone="accent"
+              label="Çalışan Ekle"
+              onPress={() => router.push('/personel/duzenle')}
+            />
+          </View>
         }
       />
       <View style={{ paddingHorizontal: spacing.xl }}>
+        {/* Geçici / Günlük Çalışan Kısayol Kartı */}
+        <Pressable
+          onPress={() => router.push('/gecici-calisan' as never)}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: c.surfaceContainerLow,
+            borderColor: c.border,
+            borderWidth: 1,
+            borderRadius: 12,
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            marginBottom: 10,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <UserCheck size={18} color={c.primary} />
+            <Text style={[type.small, { color: c.text, fontWeight: '600' }]}>
+              Geçici / Günlük Çalışanlar
+            </Text>
+          </View>
+          <Badge
+            label={`${tempLogs.length} kayıt`}
+            tone={tempLogs.length > 0 ? 'accent' : 'neutral'}
+          />
+        </Pressable>
         <SegmentedControl
           options={[
             { value: 'aktif', label: 'Aktif' },

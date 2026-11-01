@@ -97,10 +97,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUserId(user?.id ?? null);
       setEmail(user?.email ?? null);
       setName(extractName(user));
-      sub = supabase.auth.onAuthStateChange((_event, session) => {
+      sub = supabase.auth.onAuthStateChange((event, session) => {
         setUserId(session?.user?.id ?? null);
         setEmail(session?.user?.email ?? null);
         setName(extractName(session?.user ?? null));
+        // İstemci dışı kaynaklı oturum kapanması (token geçersiz, başka cihazdan
+        // çıkış vb.): bellek içi store eski firma verisini göstermeye devam
+        // etmesin — signOut ile aynı temizlik çalışır (idempotent).
+        if (event === 'SIGNED_OUT') {
+          const st = useDataStore.getState();
+          st.replaceDB(emptyDB());
+          st.setOrg(null);
+          st.setUserId('anon');
+          useSyncState.getState().reset();
+          AsyncStorage.removeItem('tekstil:last-sync').catch(() => undefined);
+        }
       });
       setReady(true);
     })();
@@ -233,10 +244,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       async createManagedUser(ad, mail, password, role) {
         const key = mail.trim().toLowerCase();
         const cleanName = ad.trim();
-        const { data, error } = await supabase.functions.invoke<{ userId: string; member: OrgMember }>(
-          'admin-create-user',
-          { method: 'POST', body: { name: cleanName, email: key, password, role } }
-        );
+        const { data, error } = await supabase.functions.invoke<{
+          userId: string;
+          member: OrgMember;
+          existing?: boolean;
+        }>('admin-create-user', { method: 'POST', body: { name: cleanName, email: key, password, role } });
         if (error) {
           return await functionErrorMessage(error, 'Kullanıcı oluşturulamadı.');
         }
@@ -245,7 +257,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (member) {
           useDataStore.getState().upsert('org_members', member);
         }
-        return null;
+        return data?.existing
+          ? 'Not: Bu e-posta ile kayıtlı bir hesap zaten vardı; üyelik eklendi. Kişi kendi mevcut şifresiyle giriş yapar.'
+          : null;
       },
       async resetManagedUserPassword(targetUserId, newPassword) {
         if (newPassword.length < 6) return 'Şifre en az 6 karakter olmalı.';

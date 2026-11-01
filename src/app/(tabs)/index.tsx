@@ -13,11 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   AlertCircle,
   ArrowRight,
-  Calendar,
+  BarChart3,
   CheckCircle2,
   ChevronRight,
-  Clock,
-  Flag,
   Settings,
   SlidersHorizontal,
   UserCheck,
@@ -35,23 +33,22 @@ import {
   useEvents,
   useMonthAttendance,
   useOrg,
-  useSettings,
   useAllSalaries,
 } from '../../data/hooks';
 import { getDayPlan, addDaysISO, todayISO } from '../../domain/schedule';
+import { categorizeAttendance } from '../../domain/attendance';
 import { calculateDebtBalance } from '../../domain/debts';
 import { formatMoneyShort, formatTarih } from '../../utils/format';
-import { useDataStore } from '../../data/store';
+import { useDataStore, useSyncState } from '../../data/store';
 import { QuickActionsSheet } from '../../features/QuickActions';
 import { hapticLight, hapticMedium } from '../../utils/haptics';
 
-/** Bugün paneli: yoklama özeti, haftalık grafik ve yaklaşan günler */
+/** Bugün paneli: yoklama özeti ve haftalık grafik */
 export default function Bugun() {
   const { c, type, statusColor } = useTheme();
   const insets = useSafeAreaInsets();
   const auth = useAuth();
   const org = useOrg();
-  const settings = useSettings();
   const employees = useEmployees({ active: true });
   const allSalaries = useAllSalaries();
   const day = todayISO();
@@ -63,7 +60,19 @@ export default function Bugun() {
   const allAttendance = useDataStore((s) => s.db.attendance);
   const scheduleDays = useDataStore((s) => s.db.schedule_days);
   const syncing = useDataStore((s) => !s.loaded);
+  const triggerSync = useSyncState((s) => s.triggerSync);
   const [quickOpen, setQuickOpen] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const onRefresh = React.useCallback(() => {
+    setRefreshing(true);
+    try {
+      triggerSync?.();
+    } finally {
+      // Senkron motoru kendi durumunu yönetir; çekme göstergesi kısa bir turda kapanır
+      setTimeout(() => setRefreshing(false), 1200);
+    }
+  }, [triggerSync]);
 
   const plan = useMemo(() => getDayPlan(day, scheduleDays, events), [day, scheduleDays, events]);
 
@@ -81,22 +90,16 @@ export default function Bugun() {
 
     for (const e of workdayEmployees) {
       const rec = byEmployee.get(e.id);
-      if (!rec || rec.status === 'geldi') {
-        present++;
-      } else if (rec.status === 'gec_geldi') {
-        present++;
-        late++;
-      } else if (rec.status === 'erken_cikti' || rec.status === 'yarim_gun') {
-        present++;
-      } else if (rec.status === 'gelmedi') {
+      const category = categorizeAttendance(rec?.status ?? 'geldi');
+      if (category === 'absent') {
+        // "N Gelmedi" counts only true gelmedi; unpaid (işsiz/ücretsiz izin) has its own bucket
         absent++;
-      } else if (rec.status === 'ucretsiz_izin') {
-        absent++;
-        leave++;
-      } else if (rec.status === 'yillik_izin' || rec.status === 'mazeret_izni') {
-        leave++;
-      } else if (rec.status === 'rapor') {
-        report++;
+      } else if (category === 'leave') {
+        if (rec?.status === 'rapor') report++;
+        else leave++;
+      } else {
+        present++;
+        if (rec?.status === 'gec_geldi') late++;
       }
     }
 
@@ -106,7 +109,7 @@ export default function Bugun() {
       .filter((b) => !b.isFullyPaid)
       .reduce((s, b) => s + b.remaining, 0);
 
-    const monthAbsence = monthAtt.filter((a) => a.status === 'gelmedi' || a.status === 'ucretsiz_izin').length;
+    const monthAbsence = monthAtt.filter((a) => a.status === 'gelmedi' || a.status === 'ucretsiz_izin' || a.status === 'issiz_gunu').length;
 
     const [yStr, mStr] = day.split('-');
     const yNum = Number(yStr);
@@ -197,58 +200,6 @@ export default function Bugun() {
     return Math.round(validPcts.reduce((a, b) => a + b, 0) / validPcts.length);
   }, [day, employees, events, scheduleDays, allAttendance]);
 
-  // Yaklaşan önemli günler (Resmi tatiller, ek çalışma, maaş günü)
-  const upcoming = useMemo(() => {
-    const items: { title: string; subtitle: string; tag: string; type: 'flag' | 'overtime' | 'pay' }[] = [];
-    const soon = events
-      .filter((e) => e.date >= day && e.date <= addDaysISO(day, 35))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    const toUtcDayNumber = (iso: string) => {
-      const [y, m, d] = iso.split('-').map(Number);
-      return Math.round(Date.UTC(y, m - 1, d) / (1000 * 60 * 60 * 24));
-    };
-
-    for (const e of soon.slice(0, 3)) {
-      const diffDays = toUtcDayNumber(e.date) - toUtcDayNumber(day);
-      const tag = diffDays === 0 ? 'Bugün' : diffDays === 1 ? 'Yarın' : `${diffDays} gün kaldı`;
-      if (e.type === 'resmi_tatil') {
-        items.push({
-          title: e.title,
-          subtitle: `${formatTarih(e.date, { yil: false })} · Resmî tatil`,
-          tag,
-          type: 'flag',
-        });
-      } else if (e.type === 'ek_calisma') {
-        items.push({
-          title: e.title || 'Ek Çalışma Vardiyası',
-          subtitle: `${formatTarih(e.date, { yil: false })} · Atölye ek mesai`,
-          tag: diffDays <= 7 ? 'Bu Hafta' : tag,
-          type: 'overtime',
-        });
-      }
-    }
-
-    // Maaş günü hesaplama
-    const todayDay = Number(day.slice(8));
-    const payday = settings.paydayOfMonth || 5;
-    let paydayDate: string;
-    if (todayDay <= payday) {
-      paydayDate = `${day.slice(0, 7)}-${String(payday).padStart(2, '0')}`;
-    } else {
-      paydayDate = `${addDaysISO(`${day.slice(0, 7)}-28`, 7).slice(0, 7)}-${String(payday).padStart(2, '0')}`;
-    }
-    const payDiff = toUtcDayNumber(paydayDate) - toUtcDayNumber(day);
-    items.push({
-      title: 'Maaş & Parça Başı Hakediş',
-      subtitle: `${formatTarih(paydayDate, { yil: false })} · Aylık bordro dağıtımı`,
-      tag: payDiff === 0 ? 'Bugün' : `${payDiff} gün`,
-      type: 'pay',
-    });
-
-    return items;
-  }, [events, day, settings.paydayOfMonth]);
-
   if (syncing) {
     return (
       <Screen bottomInset={100}>
@@ -284,7 +235,7 @@ export default function Bugun() {
   return (
     <Screen
       bottomInset={110}
-      refreshControl={<RefreshControl refreshing={false} onRefresh={() => undefined} tintColor={c.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
     >
       {/* 1. ÜST BAR: STITCH LOGO & TEKSTİL ERP + BİLDİRİMLER & PROFİL */}
       <View
@@ -308,6 +259,25 @@ export default function Bugun() {
         </View>
 
         <View style={styles.headerActions}>
+          <Link href="/raporlar" asChild>
+            <Pressable
+              hitSlop={10}
+              onPress={() => hapticLight()}
+              style={({ pressed }) => [
+                styles.settingsBtn,
+                { marginRight: 8 },
+                {
+                  backgroundColor: c.surface,
+                  borderColor: c.border,
+                  opacity: pressed ? 0.75 : 1,
+                },
+              ]}
+              accessibilityLabel="Raporlar"
+              accessibilityRole="button"
+            >
+              <BarChart3 size={22} color={c.text} />
+            </Pressable>
+          </Link>
           <Link href="/ayarlar" asChild>
             <Pressable
               hitSlop={10}
@@ -580,7 +550,7 @@ export default function Bugun() {
               Haftalık Devam
             </Text>
             <Text style={[type.bodySm, { color: c.textMuted, marginTop: 2 }]}>
-              {monthlyAverage !== null ? `Son 30 gün ortalaması %${monthlyAverage}` : 'Bu ay henüz yoklama yok'}
+              {monthlyAverage !== null ? `Son 30 gün ortalaması %${monthlyAverage}` : 'Son 30 günde yoklama kaydı yok'}
             </Text>
           </View>
           {monthlyAverage !== null ? (
@@ -627,66 +597,6 @@ export default function Bugun() {
                 >
                   {w.isToday ? 'Bugün' : w.label}
                 </Text>
-              </View>
-            );
-          })}
-        </View>
-      </Card>
-
-      {/* 6. YAKLAŞAN ÖNEMLİ GÜNLER KARTI */}
-      <Card padded style={styles.upcomingCard}>
-        <View style={styles.upcomingHeader}>
-          <Text style={[type.labelSm, { color: c.textMuted, letterSpacing: 0.8 }]}>
-            YAKLAŞAN ÖNEMLİ GÜNLER
-          </Text>
-          <Pressable
-            onPress={() => {
-              hapticLight();
-              router.push('/ayarlar/takvim');
-            }}
-          >
-            <Text style={[type.labelSm, { color: c.primary, fontWeight: '600' }]}>Tümünü Gör</Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.upcomingList}>
-          {upcoming.map((item, idx) => {
-            const tone =
-              item.type === 'flag'
-                ? { bg: c.dangerSoft, fg: c.danger }
-                : item.type === 'overtime'
-                ? { bg: c.warningSoft, fg: c.warning }
-                : { bg: c.primarySoft, fg: c.primary };
-            return (
-              <View
-                key={`${item.title}-${idx}`}
-                style={[styles.upcomingRow, { backgroundColor: c.surfaceContainerLow }]}
-              >
-                <View style={styles.upcomingLeft}>
-                  <View style={[styles.upcomingIconBox, { backgroundColor: tone.bg }]}>
-                    {item.type === 'flag' ? (
-                      <Flag size={18} color={tone.fg} />
-                    ) : item.type === 'overtime' ? (
-                      <Clock size={18} color={tone.fg} />
-                    ) : (
-                      <Calendar size={18} color={tone.fg} />
-                    )}
-                  </View>
-                  <View style={styles.upcomingTextCol}>
-                    <Text style={[type.titleMd, { color: c.text, fontWeight: '600' }]}>
-                      {item.title}
-                    </Text>
-                    <Text style={[type.bodySm, { color: c.textMuted, marginTop: 1 }]}>
-                      {item.subtitle}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={[styles.upcomingTag, { backgroundColor: tone.bg }]}>
-                  <Text style={[type.labelSm, { color: tone.fg, fontWeight: '600' }]}>
-                    {item.tag}
-                  </Text>
-                </View>
               </View>
             );
           })}
@@ -937,48 +847,6 @@ const styles = StyleSheet.create({
   weekBarFill: {
     width: 14,
     borderRadius: 4,
-  },
-  upcomingCard: {
-    marginTop: 16,
-    padding: 18,
-    borderRadius: 18,
-  },
-  upcomingHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  upcomingList: {
-    gap: 10,
-  },
-  upcomingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 12,
-    borderRadius: 12,
-  },
-  upcomingLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
-  upcomingIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  upcomingTextCol: {
-    flex: 1,
-  },
-  upcomingTag: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
   },
   actionTile: {
     flexDirection: 'row',

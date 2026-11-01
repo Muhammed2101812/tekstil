@@ -29,6 +29,7 @@ export const ATTENDANCE_STATUSES = [
   'yillik_izin',
   'mazeret_izni',
   'ucretsiz_izin',
+  'issiz_gunu',
   'rapor',
 ] as const;
 
@@ -56,6 +57,28 @@ export interface ProductionBatch {
   label_color: LabelColor;
   quantity: number;
   date: string; // YYYY-MM-DD
+  note: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// ─── Geçici / Günlük Çalışan Takibi ──────────────────────────────────────────
+
+export type TempWorkDurationType = 'tam_gun' | 'yarim_gun' | 'saatlik';
+
+export interface TempWorkLog {
+  id: string;
+  org_id: string;
+  worker_name: string;
+  phone: string | null;
+  date: string; // YYYY-MM-DD
+  duration_type: TempWorkDurationType;
+  hours: number | null; // saatlik ise çalışılan saat
+  task_description: string | null; // örn. 'İplik temizleme', 'Paketleme'
+  daily_wage: number; // 0 = sadece not amaçlı (ücret belirtilmedi)
+  paid: boolean;
+  paid_at: string | null; // YYYY-MM-DD
+  payment_method: SalaryPaymentMethod | null;
   note: string | null;
   created_at?: string;
   updated_at?: string;
@@ -125,10 +148,12 @@ export interface OrgSettings {
   sickLeaveFirstTwoDaysEmployer: boolean;
   /** Hafta tatili kesintisi: hafta içi mazeretsiz devamsızlıkta o haftanın tatil ücreti de kesilir (varsayılan false) */
   weekRestPenalty: boolean;
-  /** Maaş günü (1..31, hatırlatma için) */
-  paydayOfMonth: number;
   /** Günlük yoklama hatırlatma saati ('HH:mm'); null = kapalı */
   attendanceReminderTime: string | null;
+  /** Mola başlangıç bildirimleri açık mı? (varsayılan true) */
+  breakReminderEnabled?: boolean;
+  /** Mola bitiş (iş başı) bildirimleri açık mı? (varsayılan true) */
+  breakEndReminderEnabled?: boolean;
 }
 
 export const DEFAULT_SETTINGS: OrgSettings = {
@@ -140,8 +165,9 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   deductSickLeave: true,
   sickLeaveFirstTwoDaysEmployer: false,
   weekRestPenalty: false,
-  paydayOfMonth: 5,
   attendanceReminderTime: '18:30',
+  breakReminderEnabled: true,
+  breakEndReminderEnabled: true,
 };
 
 export interface Organization {
@@ -227,8 +253,8 @@ export interface AttendanceDay {
   id: string;
   org_id: string;
   day: string;
-  confirmed_by: string;
-  confirmed_at: string;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
 }
 
 export interface OvertimeRecord {
@@ -257,6 +283,8 @@ export interface Debt {
   installments: number; // 0/1 = tek seferde
   start_month: string; // YYYY-MM
   description: string | null;
+  /** Bordro kaleminden otomatik oluşturulan borçta kaynak kalem (dedup anahtarı) */
+  payroll_item_id?: string | null;
   client_ref: string; // idempotency anahtarı (upsert)
   updated_at: string;
 }

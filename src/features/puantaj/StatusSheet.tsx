@@ -22,6 +22,8 @@ export function StatusSheet({
   payrollLocked,
   /** Ek çalışma gününde "Geldi" seçilince otomatik mesai yazılır (PLAN 4.5) */
   autoOvertime,
+  /** Mesai çarpanının doğru türetilmesi için günün türü (normal / hafta_sonu / resmi_tatil) */
+  dayKind = 'normal',
 }: {
   visible: boolean;
   onClose: () => void;
@@ -32,6 +34,7 @@ export function StatusSheet({
   planEndMinutes: number | null;
   payrollLocked: boolean;
   autoOvertime?: { eventId: string; hours: number; multiplier: number; kind: 'hafta_sonu' | 'resmi_tatil' } | null;
+  dayKind?: 'normal' | 'hafta_sonu' | 'resmi_tatil';
 }) {
   const { c, spacing, radius, type } = useTheme();
   const { showToast } = useToast();
@@ -70,7 +73,7 @@ export function StatusSheet({
   const defaultEarly = minutesToTime(planEndMinutes ?? 1080);
 
   const mainStatuses: AttendanceStatus[] = ['geldi', 'gelmedi', 'gec_geldi', 'erken_cikti'];
-  const otherStatuses: AttendanceStatus[] = ['yarim_gun', 'yillik_izin', 'mazeret_izni', 'ucretsiz_izin', 'rapor'];
+  const otherStatuses: AttendanceStatus[] = ['yarim_gun', 'yillik_izin', 'mazeret_izni', 'ucretsiz_izin', 'issiz_gunu', 'rapor'];
 
   return (
     <>
@@ -151,8 +154,10 @@ export function StatusSheet({
               variant="secondary"
               size="md"
               onPress={async () => {
+                // Çarpan, günün türünden türetilir: tatilde çalışma ×2, hafta sonu ×1,5
+                const otKind = dayKind === 'resmi_tatil' ? 'resmi_tatil' : dayKind === 'hafta_sonu' ? 'hafta_sonu' : 'hafta_ici';
                 try {
-                  await addOvertime({ employee_id: employee.id, day, hours: 1, kind: 'hafta_ici' });
+                  await addOvertime({ employee_id: employee.id, day, hours: 1, kind: otKind });
                   showToast({ message: `${employee.full_name}: 1 saat mesai eklendi`, tone: 'success' });
                 } catch (e) {
                   showToast({ message: e instanceof Error ? e.message : 'Mesai eklenemedi', tone: 'warning' });
@@ -168,6 +173,7 @@ export function StatusSheet({
                 label="Kaydı Sil"
                 variant="ghost"
                 size="md"
+                disabled={payrollLocked}
                 onPress={() => setDeleteConfirm(true)}
               />
             </View>
@@ -221,11 +227,13 @@ export function BulkStatusSheet({
   onClose,
   employeeIds,
   day,
+  payrollLocked,
 }: {
   visible: boolean;
   onClose: () => void;
   employeeIds: string[];
   day: string;
+  payrollLocked: boolean;
 }) {
   const { c, spacing, radius, type } = useTheme();
   const t = useTheme();
@@ -236,6 +244,11 @@ export function BulkStatusSheet({
 
   return (
     <BottomSheet visible={visible} onClose={onClose} title={`${employeeIds.length} kişi için uygula`}>
+      {payrollLocked ? (
+        <Text style={[type.body, { color: c.danger, paddingBottom: spacing.lg }]}>
+          Bu ay bordro kesinleşmiş; puantaj kilitli. Değiştirmek için bordroyu geri alın.
+        </Text>
+      ) : null}
       <View style={[styles.grid, { gap: 8 }]}>
         {statuses.map((s) => {
           const meta = STATUS_META[s];
@@ -244,6 +257,7 @@ export function BulkStatusSheet({
           return (
             <Pressable
               key={s}
+              disabled={payrollLocked}
               onPress={() => setPicked(s)}
               style={[styles.smallBox, { backgroundColor: soft, borderRadius: radius.md, borderColor: picked === s ? main : 'transparent' }]}
               accessibilityRole="button"
@@ -258,7 +272,7 @@ export function BulkStatusSheet({
       <View style={{ marginTop: spacing.lg, marginBottom: spacing.md }}>
         <Button
           label="Uygula"
-          disabled={!picked}
+          disabled={!picked || payrollLocked}
           onPress={async () => {
             if (!picked) return;
             try {

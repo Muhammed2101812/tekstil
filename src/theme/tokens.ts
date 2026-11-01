@@ -121,6 +121,7 @@ export const STATUS_COLORS: Record<string, StatusColorSet> = {
   yillik_izin: { light: '#7A5AF8', soft: '#F4F3FF', dark: '#A78BFA', darkSoft: '#261A63' },
   mazeret_izni: { light: '#7A5AF8', soft: '#F4F3FF', dark: '#A78BFA', darkSoft: '#261A63' },
   ucretsiz_izin: { light: '#667085', soft: '#F2F4F7', dark: '#98A2B3', darkSoft: '#1D242D' },
+  issiz_gunu: { light: '#DD2590', soft: '#FDF2FA', dark: '#F472B6', darkSoft: '#3B0A2C' },
   rapor: { light: '#2E90FA', soft: '#EFF8FF', dark: '#60A5FA', darkSoft: '#0C2D5E' },
 } as const;
 

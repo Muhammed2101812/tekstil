@@ -2,8 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { router } from 'expo-router';
-import { CalendarOff, CheckCheck, Lock, Users } from 'lucide-react-native';
-import { Avatar, Button, Chip, Header, Screen, StatusPill, TextField, DateStepper, EmptyState, useToast } from '../../ui';
+import { CalendarOff, CheckCheck, Lock, PowerOff, UserCheck, Users } from 'lucide-react-native';
+import { Avatar, Button, Chip, ConfirmSheet, Header, Screen, StatusPill, TextField, DateStepper, EmptyState, useToast } from '../../ui';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/ThemeProvider';
 import {
@@ -13,11 +13,13 @@ import {
   useEvents,
   usePayroll,
   useSchedule,
+  useTempWorkLogs,
 } from '../../data/hooks';
 import { getDayPlan, todayISO } from '../../domain/schedule';
+import { categorizeAttendance } from '../../domain/attendance';
 import { AttendanceRecord } from '../../types';
 import { StatusSheet, BulkStatusSheet } from '../../features/puantaj/StatusSheet';
-import { confirmAttendanceDay } from '../../data/repo';
+import { confirmAttendanceDay, unconfirmAttendanceDay, markAttendance, clearAttendanceByStatus } from '../../data/repo';
 import { hapticSuccess } from '../../utils/haptics';
 
 /** Puantaj (PLAN 6.4) — en sık kullanılacak ekran */
@@ -30,8 +32,10 @@ export default function Puantaj() {
   const [selected, setSelected] = useState<string[]>([]);
   const [activeEmp, setActiveEmp] = useState<string | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [issizConfirm, setIssizConfirm] = useState<null | 'mark' | 'clear'>(null);
 
   const employees = useEmployees({ active: true });
+  const dayTempLogs = useTempWorkLogs({ date: day });
   const departments = useDepartments();
   const schedule = useSchedule();
   const events = useEvents(Number(day.slice(0, 4)));
@@ -74,26 +78,42 @@ export default function Puantaj() {
     let present = 0, absent = 0, leave = 0, late = 0;
     for (const e of roster) {
       const rec = byEmployee.get(e.id);
-      if (!rec || rec.status === 'geldi') present++;
-      else if (rec.status === 'gelmedi' || rec.status === 'ucretsiz_izin') absent++;
-      else if (rec.status === 'gec_geldi') { late++; present++; }
-      else if (rec.status === 'erken_cikti' || rec.status === 'yarim_gun') present++;
-      else leave++;
+      const category = categorizeAttendance(rec?.status ?? 'geldi');
+      if (category === 'absent') absent++;
+      else if (category === 'leave') leave++;
+      else {
+        present++;
+        if (rec?.status === 'gec_geldi') late++;
+      }
     }
     return { present, absent, leave, late };
   }, [roster, byEmployee]);
 
   const deptName = (id: string | null) => departments.find((d) => d.id === id)?.name;
 
+  // Unemployment-day toggle: one tap marks the whole roster.
+  // Count only today's roster so stale off-roster records don't pin the button.
+  const issizCount = useMemo(
+    () => roster.filter((e) => byEmployee.get(e.id)?.status === 'issiz_gunu').length,
+    [roster, byEmployee]
+  );
+
   const toggleSelect = (id: string) => {
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  // Date change resets multi-selection: bulk apply must never hit the new day
+  // with a selection made for the previous day.
+  const changeDay = (d: string) => {
+    setSelected([]);
+    setDay(d);
   };
 
   if (!plan.isWorkday && plan.kind !== 'ek_calisma') {
     return (
       <Screen>
         <Header title="Puantaj" />
-        <DateStepper date={day} onChange={setDay} />
+        <DateStepper date={day} onChange={changeDay} />
         <View style={{ marginTop: 60 }}>
           <EmptyState
             icon={<CalendarOff size={32} color={c.textMuted} strokeWidth={2.0} />}
@@ -117,7 +137,7 @@ export default function Puantaj() {
     <View style={{ flex: 1, backgroundColor: c.background }}>
       <Header title="Puantaj" right={locked ? <Lock size={20} color={c.warning} /> : undefined} />
       <View style={{ paddingHorizontal: spacing.xl }}>
-        <DateStepper date={day} onChange={setDay} />
+        <DateStepper date={day} onChange={changeDay} />
         <Text style={[type.small, { color: c.textMuted, marginTop: 8 }]}>
           {plan.kind === 'ek_calisma'
             ? `Ek çalışma · ${plan.title ?? ''} · mesai çarpanı ×${plan.overtimeMultiplier?.toString().replace('.', ',')}`
@@ -148,7 +168,45 @@ export default function Puantaj() {
               </Text>
             </Pressable>
           ) : null}
+          {/* Unpaid firma holiday: payroll auto-cuts the day; marking it issiz is ignored */}
+          {plan.isWorkday && plan.kind !== 'firma_tatili_ucretsiz' && !locked && roster.length > 0 ? (
+            <Pressable
+              onPress={() => setIssizConfirm(issizCount > 0 ? 'clear' : 'mark')}
+              hitSlop={8}
+              style={styles.issizBtn}
+              accessibilityLabel={issizCount > 0 ? 'İşsiz gününü kaldır' : 'Günü işsiz işaretle'}
+              accessibilityRole="button"
+            >
+              <PowerOff size={14} color={issizCount > 0 ? c.warning : c.textMuted} />
+              <Text style={[type.labelSm, { color: issizCount > 0 ? c.warning : c.textMuted, fontWeight: '700' }]}>
+                {issizCount > 0 ? 'İşsiz gününü kaldır' : 'Günü işsiz işaretle'}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
+        {dayTempLogs.length > 0 ? (
+          <Pressable
+            onPress={() => router.push('/gecici-calisan' as never)}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: c.primarySoft,
+              borderRadius: 10,
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              marginTop: 8,
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <UserCheck size={16} color={c.primary} />
+              <Text style={[type.small, { color: c.primary, fontWeight: '700' }]}>
+                Bugün ayrıca {dayTempLogs.length} geçici/yardımcı çalışan var
+              </Text>
+            </View>
+            <Text style={[type.labelSm, { color: c.primary, fontWeight: '700' }]}>İncele →</Text>
+          </Pressable>
+        ) : null}
         <TextField label="" value={query} onChangeText={setQuery} placeholder="Ara…" />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: spacing.md }}>
           <Chip label="Tümü" selected={deptFilter === null} onPress={() => setDeptFilter(null)} />
@@ -217,6 +275,7 @@ export default function Puantaj() {
         <View style={[styles.bottom, { bottom: Math.max(insets.bottom, 12) + 68, borderColor: c.border, backgroundColor: c.tabBar }]}>
           <Button
             label="Yoklamayı Tamamla"
+            disabled={locked}
             onPress={async () => {
               try {
                 await confirmAttendanceDay(day);
@@ -232,33 +291,93 @@ export default function Puantaj() {
         <View style={[styles.bottomDone, { bottom: Math.max(insets.bottom, 12) + 68, borderColor: c.border, backgroundColor: c.tabBar }]}>
           <CheckCheck size={20} color={c.success} />
           <Text style={[type.small, { color: c.success, fontWeight: '700' }]}>Yoklama tamamlandı</Text>
+          <Pressable
+            hitSlop={8}
+            onPress={async () => {
+              try {
+                await unconfirmAttendanceDay(day);
+                showToast({ message: 'Gün onayı kaldırıldı', tone: 'success' });
+              } catch (e) {
+                showToast({ message: e instanceof Error ? e.message : 'Onay kaldırılamadı', tone: 'warning' });
+              }
+            }}
+            style={styles.bulkBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Gün onayını kaldır"
+          >
+            <Text style={[type.small, { color: c.textMuted, fontWeight: '600' }]}>Onayı Kaldır</Text>
+          </Pressable>
         </View>
       )}
 
-      {activeEmp ? (
-        <StatusSheet
-          visible={!!activeEmp}
-          onClose={() => setActiveEmp(null)}
-          employee={employees.find((e) => e.id === activeEmp)!}
-          day={day}
-          record={byEmployee.get(activeEmp) as AttendanceRecord | undefined}
-          planStartMinutes={plan.startMinutes}
-          planEndMinutes={plan.endMinutes}
-          payrollLocked={locked}
-          autoOvertime={
-            plan.kind === 'ek_calisma' && plan.event
-              ? {
-                  eventId: plan.event.id,
-                  hours: plan.plannedHours,
-                  multiplier: plan.overtimeMultiplier ?? 1.5,
-                  kind: events.some((e) => e.date === day && e.type === 'resmi_tatil') ? 'resmi_tatil' : 'hafta_sonu',
-                }
-              : null
-          }
-        />
-      ) : null}
+      {(() => {
+        // Employee may have vanished via sync; guard instead of non-null assertion
+        if (!activeEmp) return null;
+        const emp = employees.find((e) => e.id === activeEmp);
+        if (!emp) return null;
+        return (
+          <StatusSheet
+            visible={!!activeEmp}
+            onClose={() => setActiveEmp(null)}
+            employee={emp}
+            day={day}
+            record={byEmployee.get(activeEmp) as AttendanceRecord | undefined}
+            planStartMinutes={plan.startMinutes}
+            planEndMinutes={plan.endMinutes}
+            payrollLocked={locked}
+            autoOvertime={
+              plan.kind === 'ek_calisma' && plan.event
+                ? {
+                    eventId: plan.event.id,
+                    hours: plan.plannedHours,
+                    multiplier: plan.overtimeMultiplier ?? 1.5,
+                    kind: events.some((e) => e.date === day && e.type === 'resmi_tatil') ? 'resmi_tatil' : 'hafta_sonu',
+                  }
+                : null
+            }
+            dayKind={
+              events.some((e) => e.date === day && e.type === 'resmi_tatil')
+                ? 'resmi_tatil'
+                : plan.isWorkday
+                  ? 'normal'
+                  : 'hafta_sonu'
+            }
+          />
+        );
+      })()}
 
-      <BulkStatusSheet visible={bulkOpen} onClose={() => { setBulkOpen(false); setSelected([]); }} employeeIds={selected} day={day} />
+      <BulkStatusSheet visible={bulkOpen} onClose={() => { setBulkOpen(false); setSelected([]); }} employeeIds={selected} day={day} payrollLocked={locked} />
+
+      {/* İşsiz günü: tüm kadroya tek işlemde uygula / geri al (geçici çalışanlar puantaja girmez) */}
+      <ConfirmSheet
+        visible={issizConfirm !== null}
+        onClose={() => setIssizConfirm(null)}
+        title={issizConfirm === 'mark' ? 'Günü İşsiz İşaretle' : 'İşsiz Gününü Kaldır'}
+        message={
+          issizConfirm === 'mark'
+            ? `${roster.length} çalışanın ${day} kaydı "İşsiz Günü" yapılacak; o günkü mevcut durumların üzerine yazılır. İşsiz gün ücretsizdir, bordroda "İşsiz Günü Kesintisi" olarak kesilir.`
+            : `${day} günündeki ${issizCount} işsiz günü kaydı silinecek; ilgili çalışanlar varsayılan olarak "Geldi" sayılacak.`
+        }
+        confirmLabel={issizConfirm === 'mark' ? 'İşaretle' : 'Kaldır'}
+        destructive
+        onConfirm={async () => {
+          try {
+            if (issizConfirm === 'mark') {
+              await markAttendance(day, roster.map((e) => ({ employee_id: e.id, status: 'issiz_gunu' })));
+              hapticSuccess();
+              showToast({ message: `${roster.length} çalışan işsiz günü olarak işaretlendi`, tone: 'success' });
+            } else {
+              await clearAttendanceByStatus(day, 'issiz_gunu');
+              hapticSuccess();
+              showToast({ message: 'İşsiz günü kaldırıldı; kayıtlar "Geldi" sayılacak', tone: 'success' });
+            }
+          } catch (e) {
+            showToast({ message: e instanceof Error ? e.message : 'İşlem başarısız', tone: 'warning' });
+          } finally {
+            setIssizConfirm(null);
+          }
+        }}
+      />
     </View>
   );
 }
@@ -266,6 +385,7 @@ export default function Puantaj() {
 const styles = StyleSheet.create({
   countRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' },
   bulkBtn: { paddingVertical: 6, paddingHorizontal: 4 },
+  issizBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 4 },
   defaultPill: {
     paddingHorizontal: 12,
     paddingVertical: 6,

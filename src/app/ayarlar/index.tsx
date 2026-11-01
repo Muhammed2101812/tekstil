@@ -12,6 +12,7 @@ import {
   Palette,
   UserCog,
   FileText,
+  BarChart3,
 } from 'lucide-react-native';
 import { Avatar, Card, Header, ListRow, Screen } from '../../ui';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -38,6 +39,7 @@ export default function Ayarlar() {
     {
       title: 'UYGULAMA',
       items: [
+        { label: 'Raporlar', sub: 'Puantaj cetveli, bordro, borç, yedek', icon: <BarChart3 size={20} color={c.textSecondary} />, href: '/raporlar' },
         { label: 'Kullanıcılar', sub: 'Kullanıcı oluştur ve yönet', icon: <UserCog size={20} color={c.textSecondary} />, href: '/ayarlar/yoneticiler' },
         { label: 'Güvenlik', sub: 'Uygulama kilidi', icon: <ShieldCheck size={20} color={c.textSecondary} />, href: '/ayarlar/guvenlik' },
         { label: 'Bildirimler', icon: <Bell size={20} color={c.textSecondary} />, href: '/ayarlar/bildirimler' },

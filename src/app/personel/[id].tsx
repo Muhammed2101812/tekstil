@@ -80,7 +80,7 @@ export default function CalisanDetay() {
     [debts, payments, ym]
   );
   const openDebt = balances.filter((b) => !b.isFullyPaid).reduce((s, b) => s + b.remaining, 0);
-  const monthAbsence = employeeAtt.filter((a) => a.status === 'gelmedi' || a.status === 'ucretsiz_izin').length;
+  const monthAbsence = employeeAtt.filter((a) => a.status === 'gelmedi' || a.status === 'ucretsiz_izin' || a.status === 'issiz_gunu').length;
 
   const leave = useMemo(
     () => (employee ? leaveStatus(employee, leaveAdj, usedLeaveDays, todayISO()) : null),

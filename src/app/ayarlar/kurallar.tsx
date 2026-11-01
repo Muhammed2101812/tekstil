@@ -135,21 +135,6 @@ export default function AyarKurallar() {
           />
         </Row>
 
-        <Row title="Maaş Günü" desc="Ana sayfadaki maaş günü hatırlatması için ayın günü.">
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {[1, 5, 10, 15, 20, 'son'].map((d) => {
-              const val = d === 'son' ? 31 : (d as number);
-              return (
-                <Chip
-                  key={String(d)}
-                  label={d === 'son' ? 'Ayın sonu' : String(d)}
-                  selected={settings.paydayOfMonth === val}
-                  onPress={() => set({ paydayOfMonth: val })}
-                />
-              );
-            })}
-          </View>
-        </Row>
         <View style={{ height: 20 }} />
       </View>
     </Screen>

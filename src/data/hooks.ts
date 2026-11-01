@@ -179,3 +179,24 @@ export function useProductionBatches() {
   );
 }
 
+export function useTempWorkLogs(opts: { ym?: string; date?: string } = {}) {
+  const orgId = useOrgId();
+  const logs = useDataStore((s) => s.db.temp_work_logs);
+  return useMemo(
+    () =>
+      (logs ?? [])
+        .filter(
+          (l) =>
+            l.org_id === orgId &&
+            (!opts.ym || l.date.startsWith(opts.ym)) &&
+            (!opts.date || l.date === opts.date)
+        )
+        .sort((a, b) => {
+          const d = b.date.localeCompare(a.date);
+          if (d !== 0) return d;
+          return (b.created_at ?? '').localeCompare(a.created_at ?? '');
+        }),
+    [logs, orgId, opts.ym, opts.date]
+  );
+}
+

@@ -16,6 +16,8 @@ import {
   ProductionBatch,
   SalaryPaymentMethod,
   ScheduleDay,
+  TempWorkLog,
+  TempWorkDurationType,
   DEPARTMENT_PRESETS,
 } from '../types';
 import { TURKISH_HOLIDAYS } from '../domain/holidays-tr';
@@ -271,22 +273,42 @@ export interface AttendanceInput {
   note?: string | null;
 }
 
+/**
+ * Ayın bordrosu kesinleştiyse puantaj yazımını reddeder (bordro anlık görüntüsü
+ * bozulmasın). Arayüz kilitleri UX içindir; gerçek zorlama buradadır.
+ */
+function assertPayrollNotLocked(day: string) {
+  const { orgId, db } = useDataStore.getState();
+  const year = Number(day.slice(0, 4));
+  const month = Number(day.slice(5, 7));
+  const payroll = db.payrolls.find((p) => p.org_id === orgId && p.year === year && p.month === month);
+  if (payroll && payroll.status !== 'taslak') {
+    throw new Error('Bu ay bordro kesinleşmiş; puantaj kilitli. Değiştirmek için bordroyu geri alın.');
+  }
+}
+
 export async function markAttendance(day: string, inputs: AttendanceInput[], confirm = false) {
   const { orgId, db } = useDataStore.getState();
+  assertPayrollNotLocked(day);
   const rows: AttendanceRecord[] = [];
   for (const input of inputs) {
     const existing = db.attendance.find((a) => a.employee_id === input.employee_id && a.day === day);
     const id = existing?.id ?? (await attendanceId(input.employee_id, day));
+    // Yalnızca 'gec_geldi' geliş saatini, yalnızca 'erken_cikti' çıkış saatini
+    // kullanır. Diğer durumlara geçişte eski değerler kalıntı olmasın (dışa
+    // aktarım / detay görünümü sızıntısı) diye sıfırlanır.
+    const usesArrival = input.status === 'gec_geldi';
+    const usesLeave = input.status === 'erken_cikti';
     rows.push({
       id,
       org_id: orgId!,
       employee_id: input.employee_id,
       day,
       status: input.status,
-      arrival_time: input.arrival_time ?? (existing?.arrival_time ?? null),
-      leave_time: input.leave_time ?? (existing?.leave_time ?? null),
-      late_minutes: input.late_minutes ?? (existing?.late_minutes ?? 0),
-      early_leave_minutes: input.early_leave_minutes ?? (existing?.early_leave_minutes ?? 0),
+      arrival_time: usesArrival ? (input.arrival_time ?? (existing?.arrival_time ?? null)) : null,
+      leave_time: usesLeave ? (input.leave_time ?? (existing?.leave_time ?? null)) : null,
+      late_minutes: usesArrival ? (input.late_minutes ?? (existing?.late_minutes ?? 0)) : 0,
+      early_leave_minutes: usesLeave ? (input.early_leave_minutes ?? (existing?.early_leave_minutes ?? 0)) : 0,
       note: input.note ?? (existing?.note ?? null),
       updated_at: nowISO(),
     });
@@ -297,12 +319,26 @@ export async function markAttendance(day: string, inputs: AttendanceInput[], con
 
 export async function clearAttendance(day: string, employeeId: string) {
   const { db } = useDataStore.getState();
+  assertPayrollNotLocked(day);
   const existing = db.attendance.find((a) => a.employee_id === employeeId && a.day === day);
   if (existing) await remoteDelete('attendance', [existing.id]);
 }
 
+/**
+ * Bir gündeki belirli durumdaki tüm yoklama kayıtlarını tek işlemde siler
+ * (örn. "işsiz gününü kaldır": issiz_gunu kayıtları silinir, gün varsayılan
+ * "Geldi" sayılır). Kişisel diğer durum kayıtlarına dokunulmaz.
+ */
+export async function clearAttendanceByStatus(day: string, status: AttendanceStatus) {
+  const { db, orgId } = useDataStore.getState();
+  assertPayrollNotLocked(day);
+  const ids = db.attendance.filter((a) => a.org_id === orgId && a.day === day && a.status === status).map((a) => a.id);
+  if (ids.length > 0) await remoteDelete('attendance', ids);
+}
+
 export async function confirmAttendanceDay(day: string) {
   const { orgId, userId, db } = useDataStore.getState();
+  assertPayrollNotLocked(day);
   const existing = db.attendance_days.find((d) => d.day === day);
   const row: AttendanceDay = {
     id: existing?.id ?? (await attendanceDayId(orgId!, day)),
@@ -310,6 +346,20 @@ export async function confirmAttendanceDay(day: string) {
     day,
     confirmed_by: userId!,
     confirmed_at: nowISO(),
+  };
+  await remoteUpsert('attendance_days', row);
+}
+
+/** Yanlış güne onay verildiyse onayı kaldırır (kayıtlar silinmez, yalnız onay boşalır) */
+export async function unconfirmAttendanceDay(day: string) {
+  const { orgId, db } = useDataStore.getState();
+  const existing = db.attendance_days.find((d) => d.day === day);
+  if (!existing) return;
+  const row: AttendanceDay = {
+    ...existing,
+    org_id: orgId!,
+    confirmed_by: null,
+    confirmed_at: null,
   };
   await remoteUpsert('attendance_days', row);
 }
@@ -377,7 +427,11 @@ export async function giveDebt(input: {
   start_month: string;
   given_at?: string;
   description?: string | null;
+  payroll_item_id?: string | null;
 }): Promise<string> {
+  if (!(input.amount > 0)) throw new Error('Tutar sıfırdan büyük olmalıdır');
+  if (!Number.isFinite(input.installments) || input.installments < 1) throw new Error('Taksit sayısı en az 1 olmalıdır');
+  if (!/^\d{4}-\d{2}$/.test(input.start_month)) throw new Error('Başlangıç ayı YYYY-MM biçiminde olmalıdır');
   const { orgId } = useDataStore.getState();
   const id = uuid();
   await remoteUpsert('debts', {
@@ -390,6 +444,7 @@ export async function giveDebt(input: {
     installments: input.installments,
     start_month: input.start_month,
     description: input.description ?? null,
+    payroll_item_id: input.payroll_item_id ?? null,
     client_ref: id,
     updated_at: nowISO(),
   });
@@ -711,5 +766,75 @@ export async function addProductionBatch(input: {
 
 export async function deleteProductionBatch(id: string): Promise<void> {
   await remoteDelete('production_batches', [id]);
+}
+
+// ─── Geçici / Günlük Çalışan Takibi ──────────────────────────────────────────
+
+export async function addTempWorkLog(input: {
+  id?: string;
+  worker_name: string;
+  phone?: string | null;
+  date?: string;
+  duration_type?: TempWorkDurationType;
+  hours?: number | null;
+  task_description?: string | null;
+  daily_wage?: number;
+  paid?: boolean;
+  paid_at?: string | null;
+  payment_method?: SalaryPaymentMethod | null;
+  note?: string | null;
+}): Promise<string> {
+  const orgId = useDataStore.getState().orgId;
+  if (!orgId) throw new Error('Firma seçili değil');
+  if (!input.worker_name.trim()) throw new Error('Çalışan adı zorunludur');
+
+  const id = input.id ?? (await uuid());
+  const row: TempWorkLog = {
+    id,
+    org_id: orgId,
+    worker_name: input.worker_name.trim(),
+    phone: input.phone?.trim() || null,
+    date: input.date ?? todayISO(),
+    duration_type: input.duration_type ?? 'tam_gun',
+    hours: input.hours ?? null,
+    task_description: input.task_description?.trim() || null,
+    daily_wage: input.daily_wage ? Math.max(0, input.daily_wage) : 0,
+    paid: input.paid ?? false,
+    paid_at: input.paid ? (input.paid_at ?? input.date ?? todayISO()) : null,
+    payment_method: input.paid ? (input.payment_method ?? 'nakit') : null,
+    note: input.note?.trim() || null,
+    created_at: nowISO(),
+    updated_at: nowISO(),
+  };
+
+  await remoteUpsert('temp_work_logs', row);
+  return id;
+}
+
+export async function updateTempWorkLog(log: TempWorkLog): Promise<void> {
+  await remoteUpsert('temp_work_logs', touch(log));
+}
+
+export async function markTempWorkPaid(
+  id: string,
+  paymentMethod: SalaryPaymentMethod = 'nakit',
+  paidAt?: string
+): Promise<void> {
+  const { db } = useDataStore.getState();
+  const log = db.temp_work_logs.find((l) => l.id === id);
+  if (!log) return;
+  await remoteUpsert(
+    'temp_work_logs',
+    touch({
+      ...log,
+      paid: true,
+      paid_at: paidAt ?? todayISO(),
+      payment_method: paymentMethod,
+    })
+  );
+}
+
+export async function deleteTempWorkLog(id: string): Promise<void> {
+  await remoteDelete('temp_work_logs', [id]);
 }
 

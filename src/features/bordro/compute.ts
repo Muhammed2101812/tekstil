@@ -38,7 +38,10 @@ export async function computePayrollForMonth(
   const lastDay = daysInMonth(year, month);
   const monthEnd = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
 
-  const active = db.employees.filter((e) => e.org_id === orgId && e.start_date <= monthEnd && (!e.end_date || e.end_date >= monthStart));
+  // Pasife alınmış (active: false) çalışanlar bordroya girmez; tarih penceresi tek başına yeterli değildir
+  const active = db.employees.filter(
+    (e) => e.org_id === orgId && e.active !== false && e.start_date <= monthEnd && (!e.end_date || e.end_date >= monthStart)
+  );
   const payrollId = await deterministicUuid(`pay:${orgId}:${year}:${month}`);
 
   const items: PayrollItem[] = [];
@@ -92,6 +95,7 @@ export async function computePayrollForMonth(
         debtCut: result.breakdown.debtCut,
         uncoveredCut: result.breakdown.uncoveredCut,
         lines: result.breakdown.lines,
+        warning: result.breakdown.warning,
       },
       updated_at: new Date().toISOString(),
     });
@@ -105,7 +109,12 @@ export function itemBadges(item: PayrollItem): string[] {
   const absenceLines = item.breakdown.lines.filter(
     (l) => l.amount < 0 && !l.label.includes('Avans') && !l.label.includes('Ek Kesinti') && !l.label.includes('Hafta Tatili')
   );
-  const fullDays = absenceLines.filter((l) => l.label.startsWith('Gelmedi') || l.label.startsWith('Ücretsiz İzin')).length;
+  // İşsiz günleri tek satırda "(N gün)" olarak toplandığından gün sayısı etiketten okunur
+  const fullDays = absenceLines.reduce((days, l) => {
+    if (l.label.startsWith('Gelmedi') || l.label.startsWith('Ücretsiz İzin')) return days + 1;
+    const issiz = l.label.match(/^İşsiz Günü Kesintisi \((\d+) gün\)$/);
+    return issiz ? days + Number(issiz[1]) : days;
+  }, 0);
   if (fullDays > 0) badges.push(`−${fullDays} gün`);
   if (item.breakdown.overtimeHours > 0) badges.push(`+${item.breakdown.overtimeHours} sa mesai`);
   if (item.debt_cut > 0) badges.push(`−${formatMoneyShort(item.debt_cut)} taksit`);

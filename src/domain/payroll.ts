@@ -112,9 +112,16 @@ export function calculateEmployeePayroll(input: PayrollCalcInput): PayrollCalcRe
   // 3. Gün gün puantaj değerlendirmesi
   const byDay = new Map(attendance.map((a) => [a.day, a]));
   let absenceCut = 0;
+  let missedHours = 0;
+  let activePlannedHours = 0;
   let overtimeHours = 0;
   let overtimePayTotal = 0;
   const unexcusedWeeks = new Set<string>();
+
+  // İşsiz günleri gün gün satır yerine tek toplu kaleme toplanır
+  let issizDays = 0;
+  let issizHours = 0;
+  let issizCut = 0;
 
   // Rapor ilk 2 gün işveren öder: ardışık rapor koşularını takip et
   let raporRunIndex = 0;
@@ -127,10 +134,15 @@ export function calculateEmployeePayroll(input: PayrollCalcInput): PayrollCalcRe
       continue;
     }
 
+    if (plan.isWorkday) activePlannedHours = round2(activePlannedHours + plan.plannedHours);
+
     // Ücretsiz firma tatili: otomatik kesinti (yoklama gerektirmez)
     if (plan.kind === 'firma_tatili_ucretsiz') {
       const dayRate = rate.forDay(plan.date);
       const cut = round2(plan.plannedHours * dayRate);
+      // Full-absence closure is hour-based: the cut holiday also counts as
+      // missed planned hours, otherwise a fully-unworked month overpays.
+      missedHours = round2(missedHours + plan.plannedHours);
       if (cut > 0) {
         absenceCut = round2(absenceCut + cut);
         lines.push({
@@ -163,21 +175,39 @@ export function calculateEmployeePayroll(input: PayrollCalcInput): PayrollCalcRe
     const impact = evaluateAttendanceDay(record, plan, dayRate, settings, { raporEmployerPaid });
     if (impact.deduction > 0) {
       absenceCut = round2(absenceCut + impact.deduction);
-      const statusLabels: Record<string, string> = {
-        gelmedi: 'Gelmedi',
-        gec_geldi: 'Geç Geldi',
-        erken_cikti: 'Erken Çıktı',
-        yarim_gun: 'Yarım Gün',
-        ucretsiz_izin: 'Ücretsiz İzin',
-        rapor: 'Raporlu',
-      };
-      lines.push({
-        label: `${statusLabels[impact.status] ?? impact.status} (${plan.date.slice(8)}.${plan.date.slice(5, 7)})`,
-        amount: -impact.deduction,
-        detail: impact.description,
-      });
+      if (impact.status === 'issiz_gunu') {
+        issizDays += 1;
+        issizHours = round2(issizHours + impact.missedHours);
+        issizCut = round2(issizCut + impact.deduction);
+      } else {
+        const statusLabels: Record<string, string> = {
+          gelmedi: 'Gelmedi',
+          gec_geldi: 'Geç Geldi',
+          erken_cikti: 'Erken Çıktı',
+          yarim_gun: 'Yarım Gün',
+          ucretsiz_izin: 'Ücretsiz İzin',
+          issiz_gunu: 'İşsiz Günü',
+          rapor: 'Raporlu',
+        };
+        lines.push({
+          label: `${statusLabels[impact.status] ?? impact.status} (${plan.date.slice(8)}.${plan.date.slice(5, 7)})`,
+          amount: -impact.deduction,
+          detail: impact.description,
+        });
+      }
     }
+    missedHours = round2(missedHours + impact.missedHours);
     if (impact.isUnexcused) unexcusedWeeks.add(isoWeekKey(plan.date));
+  }
+
+  // İşsiz günü kesintisi: atölyede iş olmayan günlerin toplu kalemi
+  // (kişisel ücretsiz izin kesintisinden ayrı gösterilir)
+  if (issizDays > 0) {
+    lines.push({
+      label: `İşsiz Günü Kesintisi (${issizDays} gün)`,
+      amount: -issizCut,
+      detail: `Atölyede iş yoktu · ${issizHours} saat × gün bazlı ücret = −${issizCut.toFixed(2)} ₺`,
+    });
   }
 
   // 4. Hafta tatili kesintisi (isteğe bağlı, varsayılan kapalı)
@@ -190,6 +220,32 @@ export function calculateEmployeePayroll(input: PayrollCalcInput): PayrollCalcRe
       label: 'Hafta Tatili Kesintisi',
       amount: -total,
       detail: `${unexcusedWeeks.size} hafta mazeretsiz devamsızlık × ${restCut.toFixed(2)} ₺`,
+    });
+  }
+
+  // Tam devamsızlık: aktif planlı saatin tamamı kaçtıysa tabanın tamamı kesilir.
+  // (Yöntem A'nın sabit 195 saatlik tabanı, ayın gerçek planlı saatinden az olduğunda
+  // tüm ay devamsızlıkta bile artık ödeme bırakıyordu — çalışılmayan gün için ücret borcu doğmaz.)
+  if (base.base > 0 && activePlannedHours > 0 && missedHours >= round2(activePlannedHours - 1e-9)) {
+    if (absenceCut < base.base) {
+      const added = round2(base.base - absenceCut);
+      absenceCut = base.base;
+      lines.push({
+        label: 'Tam Devamsızlık',
+        amount: -added,
+        detail: 'Planlı çalışma saatinin tamamı kaçtı; taban net maaşın tamamı kesildi',
+      });
+    }
+  }
+
+  // Kesintiler taban net maaşı aşamaz (geç gelme/erken çıkış/hafta tatili birikimiyle oluşan taşma)
+  if (base.base > 0 && absenceCut > base.base) {
+    const waived = round2(absenceCut - base.base);
+    absenceCut = base.base;
+    lines.push({
+      label: 'Kesinti Tabanla Sınırlandı',
+      amount: waived,
+      detail: 'Kesintiler taban net maaşı aşan kısımda silindi',
     });
   }
 

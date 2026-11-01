@@ -227,6 +227,7 @@ function RootNavigator() {
         <Stack.Screen name="avans-ver" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         <Stack.Screen name="ek-calisma" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         <Stack.Screen name="uretim" options={{ presentation: 'card', animation: 'slide_from_right' }} />
+        <Stack.Screen name="gecici-calisan" options={{ presentation: 'card', animation: 'slide_from_right' }} />
       </Stack>
       <UpdateGateModal visible={needsUpdate} config={updateConfig} />
     </View>

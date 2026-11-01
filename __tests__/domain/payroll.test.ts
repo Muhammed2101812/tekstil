@@ -406,7 +406,7 @@ describe('Bordro hesaplama motoru — PLAN 14.1 senaryoları', () => {
     expect(r.debtCut).toBe(10000); // öneri 10.000 ≤ ara toplam 23.076,90
     expect(r.netPayable).toBe(r2(30000 - r2(5 * 1384.62) - 10000));
 
-    // Ekstrem: devamsızlık + el kesintisi tabanı aşar → net 0, uncovered > 0, borç 0
+    // Ekstrem: tüm ay devamsız (tabanın tamamı kesilir) + el kesintisi → net 0, uncovered = el kesintisi, borç 0
     const tumGunler: AttendanceRecord[] = [];
     for (let d = 2; d <= 30; d++) {
       const day = `2026-11-${String(d).padStart(2, '0')}`;
@@ -416,8 +416,63 @@ describe('Bordro hesaplama motoru — PLAN 14.1 senaryoları', () => {
       baseInput({ attendance: tumGunler, debts: [buyukBorc], adjustments: { extraCut: 2000 } })
     );
     expect(cokKesinti.netPayable).toBe(0);
-    expect(cokKesinti.uncoveredCut).toBe(r2(2000 - (30000 - r2(21 * 1384.62))));
+    // Tam devamsızlıkta tabanın tamamı kesildiğinden uncovered artık yalnız el kesintisidir
+    expect(cokKesinti.uncoveredCut).toBe(2000);
     expect(cokKesinti.debtCut).toBe(0);
+  });
+
+  test('18. Tam devamsızlıkta net 0 — Yöntem A artık ödemesi kapatıldı', () => {
+    // Kasım 2026: 21 iş günü × 9 saat = 189 planlı saat < Yöntem A tabanı 195 saat.
+    // Eski davranış 922,98 ₺ artık bırakıyordu; çalışılmayan gün için ücret borcu doğmaz.
+    const atts: AttendanceRecord[] = [];
+    for (let d = 2; d <= 30; d++) {
+      const day = `2026-11-${String(d).padStart(2, '0')}`;
+      if (getDayPlan(day, SCHEDULE, []).isWorkday) atts.push(att(day, 'gelmedi'));
+    }
+    const r = calculateEmployeePayroll(baseInput({ attendance: atts }));
+    expect(r.absenceCut).toBe(30000);
+    expect(r.netPayable).toBe(0);
+    expect(r.uncoveredCut).toBe(0);
+
+    // Kısmi devamsızlıkta günlük tutar değişmez (PLAN 4.3 örneği korunur)
+    const tekGun = calculateEmployeePayroll(baseInput({ attendance: [att('2026-11-12', 'gelmedi')] }));
+    expect(tekGun.absenceCut).toBe(r2(1384.62));
+    expect(tekGun.netPayable).toBe(r2(30000 - r2(1384.62)));
+  });
+
+  test('19. Kesintiler tabanı aşarsa (çoklu devamsızlık + hafta tatili) tabanla sınırlandırılır', () => {
+    // 20 devamsız gün (27.692,40) + 4 hafta tatili cezası (5.538,48) = 33.230,88 > 30.000
+    const atts: AttendanceRecord[] = [];
+    let eklenen = 0;
+    for (let d = 2; d <= 30 && eklenen < 20; d++) {
+      const day = `2026-11-${String(d).padStart(2, '0')}`;
+      if (getDayPlan(day, SCHEDULE, []).isWorkday) {
+        atts.push(att(day, 'gelmedi'));
+        eklenen++;
+      }
+    }
+    const r = calculateEmployeePayroll(
+      baseInput({ attendance: atts, settings: { ...DEFAULT_SETTINGS, weekRestPenalty: true } })
+    );
+    expect(r.absenceCut).toBe(30000);
+    expect(r.netPayable).toBe(0);
+    const satirToplam = r.breakdown.lines.reduce((s, l) => r2(s + l.amount), 0);
+    expect(r.netPayable).toBe(satirToplam);
+  });
+
+  test('20. Taksit kuruş artığı son taksitte kapanır (100 ₺ / 3 → 33,33 + 33,33 + 33,34)', () => {
+    const kucuk = debt({ amount: 100, installments: 3 });
+    const b1 = calculateDebtBalance(kucuk, [], '2026-11');
+    expect(b1.suggestedInstallment).toBe(33.33);
+
+    // İki taksit kesildikten sonra kalan 33,34 → son taksit kalanın tamamı, 4. ay oluşmaz
+    const odemeler: DebtPayment[] = [
+      { id: 'p1', org_id: ORG, debt_id: kucuk.id, employee_id: 'emp-1', amount: 33.33, paid_at: '2026-11-05', method: 'maas_kesinti', payroll_item_id: null, note: null },
+      { id: 'p2', org_id: ORG, debt_id: kucuk.id, employee_id: 'emp-1', amount: 33.33, paid_at: '2026-12-05', method: 'maas_kesinti', payroll_item_id: null, note: null },
+    ];
+    const b2 = calculateDebtBalance(kucuk, odemeler, '2027-01');
+    expect(b2.remaining).toBe(33.34);
+    expect(b2.suggestedInstallment).toBe(33.34);
   });
 
   test('16. Kuruş yuvarlama tutarlılığı — net = satırların toplamı', () => {
@@ -622,6 +677,133 @@ describe('Denetim Bulguları Ek Testleri (K/O düzeltmeleri)', () => {
     expect(dates).toContain('2029-10-29');
     expect(dates).toContain('2030-01-01');
     expect(dates).toContain('2030-10-29');
+  });
+});
+
+describe('İşsiz Günü (issiz_gunu) — atölyede iş olmayan gün', () => {
+  test('işsiz gün ücretsiz izinle aynı tutarda kesilir ama kendi toplu kaleminde gösterilir', () => {
+    const r = calculateEmployeePayroll(baseInput({ attendance: [att('2026-11-03', 'issiz_gunu')] }));
+    // 9 saat × 153,85 ₺ (Yöntem A) — günlük kesinti ucretsiz_izin ile aynı
+    expect(r.absenceCut).toBe(1384.62);
+    expect(r.netPayable).toBe(r2(30000 - 1384.62));
+    const issizLine = r.breakdown.lines.find((l) => l.label.startsWith('İşsiz Günü Kesintisi'));
+    expect(issizLine?.label).toBe('İşsiz Günü Kesintisi (1 gün)');
+    expect(issizLine?.amount).toBe(-1384.62);
+    // Gün gün "İşsiz Günü (03.11)" satırı açılmaz
+    expect(r.breakdown.lines.some((l) => /^İşsiz Günü \(/.test(l.label))).toBe(false);
+  });
+
+  test('işsiz günler tek kaleme toplanır; kişisel ücretsiz izin kendi satırında kalır', () => {
+    const r = calculateEmployeePayroll({
+      ...baseInput({
+        attendance: [
+          att('2026-11-03', 'issiz_gunu'),
+          att('2026-11-04', 'issiz_gunu'),
+          att('2026-11-05', 'ucretsiz_izin'),
+        ],
+      }),
+    });
+    expect(r.absenceCut).toBe(r2(3 * 1384.62));
+
+    const issiz = r.breakdown.lines.find((l) => l.label.startsWith('İşsiz Günü Kesintisi'));
+    expect(issiz?.label).toBe('İşsiz Günü Kesintisi (2 gün)');
+    expect(issiz?.amount).toBe(-r2(2 * 1384.62));
+
+    const ucretsiz = r.breakdown.lines.find((l) => l.label.startsWith('Ücretsiz İzin ('));
+    expect(ucretsiz?.amount).toBe(-1384.62);
+
+    // Kuruş disiplini: net = satırların toplamı
+    const satirToplam = r.breakdown.lines.reduce((s, l) => r2(s + l.amount), 0);
+    expect(r.netPayable).toBe(satirToplam);
+  });
+
+  test('işsiz gün yoksa "İşsiz Günü Kesintisi" kalemi oluşmaz', () => {
+    const ucretsiz = calculateEmployeePayroll(baseInput({ attendance: [att('2026-11-03', 'ucretsiz_izin')] }));
+    expect(ucretsiz.breakdown.lines.some((l) => l.label.includes('İşsiz Günü'))).toBe(false);
+    const bos = calculateEmployeePayroll(baseInput());
+    expect(bos.breakdown.lines.some((l) => l.label.includes('İşsiz Günü'))).toBe(false);
+  });
+
+  test('hafta sonu / tatil günündeki işsiz kaydı kesinti üretmez', () => {
+    // 2026-11-01 Pazar
+    const r = calculateEmployeePayroll(baseInput({ attendance: [att('2026-11-01', 'issiz_gunu')] }));
+    expect(r.absenceCut).toBe(0);
+    expect(r.breakdown.lines.some((l) => l.label.includes('İşsiz Günü'))).toBe(false);
+  });
+
+  test('tüm ay işsiz → tam devamsızlık kapanır: net 0, satırlar tutarlı', () => {
+    const atts: AttendanceRecord[] = [];
+    for (let d = 2; d <= 30; d++) {
+      const day = `2026-11-${String(d).padStart(2, '0')}`;
+      if (getDayPlan(day, SCHEDULE, []).isWorkday) atts.push(att(day, 'issiz_gunu'));
+    }
+    const r = calculateEmployeePayroll(baseInput({ attendance: atts }));
+    expect(r.absenceCut).toBe(30000);
+    expect(r.netPayable).toBe(0);
+    const satirToplam = r.breakdown.lines.reduce((s, l) => r2(s + l.amount), 0);
+    expect(r.netPayable).toBe(satirToplam);
+  });
+
+  test('tüm iş günleri gelmedi + 1 ücretsiz firma tatili → tam devamsızlık kapanır, net 0', () => {
+    const firmaTatili: CalendarEvent = {
+      id: 'ev-issiz-tatil',
+      org_id: ORG,
+      date: '2026-11-20', // Cuma iş günü, ücretsiz firma tatiline çevrilir
+      type: 'firma_tatili',
+      title: 'Sipariş yokluğu',
+      start_time: null,
+      end_time: null,
+      paid: false,
+      multiplier: null,
+      scope: 'tumu',
+      department_id: null,
+      employee_ids: [],
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+    const atts: AttendanceRecord[] = [];
+    for (let d = 2; d <= 30; d++) {
+      const day = `2026-11-${String(d).padStart(2, '0')}`;
+      // Ücretsiz firma tatili günü puantaj gerektirmez; kalan iş günleri gelmedi
+      if (getDayPlan(day, SCHEDULE, [firmaTatili]).isWorkday && day !== firmaTatili.date) {
+        atts.push(att(day, 'gelmedi'));
+      }
+    }
+    const r = calculateEmployeePayroll(baseInput({ events: [firmaTatili], attendance: atts }));
+    expect(r.absenceCut).toBe(30000);
+    expect(r.netPayable).toBe(0);
+    expect(r.uncoveredCut).toBe(0);
+    const satirToplam = r.breakdown.lines.reduce((s, l) => r2(s + l.amount), 0);
+    expect(r.netPayable).toBe(satirToplam);
+  });
+
+  test('tüm iş günleri issiz_gunu + 1 ücretsiz firma tatili → tam devamsızlık kapanır, net 0', () => {
+    const firmaTatili: CalendarEvent = {
+      id: 'ev-issiz-tatil-2',
+      org_id: ORG,
+      date: '2026-11-20',
+      type: 'firma_tatili',
+      title: 'Sipariş yokluğu',
+      start_time: null,
+      end_time: null,
+      paid: false,
+      multiplier: null,
+      scope: 'tumu',
+      department_id: null,
+      employee_ids: [],
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+    const atts: AttendanceRecord[] = [];
+    for (let d = 2; d <= 30; d++) {
+      const day = `2026-11-${String(d).padStart(2, '0')}`;
+      if (getDayPlan(day, SCHEDULE, [firmaTatili]).isWorkday && day !== firmaTatili.date) {
+        atts.push(att(day, 'issiz_gunu'));
+      }
+    }
+    const r = calculateEmployeePayroll(baseInput({ events: [firmaTatili], attendance: atts }));
+    expect(r.absenceCut).toBe(30000);
+    expect(r.netPayable).toBe(0);
+    const satirToplam = r.breakdown.lines.reduce((s, l) => r2(s + l.amount), 0);
+    expect(r.netPayable).toBe(satirToplam);
   });
 });
 

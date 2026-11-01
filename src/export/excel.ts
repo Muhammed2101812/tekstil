@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import * as XLSX from 'xlsx';
-import { PayrollItem, Employee } from '../types';
+import { PayrollItem, Employee, TempWorkLog } from '../types';
 import { DataDB } from '../data/store';
 import { supabase, pullAll } from '../data/supabase';
 
@@ -45,14 +45,14 @@ export async function sharePuantajExcel(
 ) {
   const etiket: Record<string, string> = {
     geldi: 'G', gelmedi: 'X', gec_geldi: 'Geç', erken_cikti: 'Erken', yarim_gun: 'Yarım',
-    yillik_izin: 'İzin', mazeret_izni: 'Maz', ucretsiz_izin: 'Ücr', rapor: 'Rpr',
+    yillik_izin: 'İzin', mazeret_izni: 'Maz', ucretsiz_izin: 'Ücr', issiz_gunu: 'İşs', rapor: 'Rpr',
   };
   const data = rows.map((r) => {
     const obj: Record<string, unknown> = { 'Çalışan': r.name, 'Departman': r.department ?? '' };
     gunler.forEach((g, i) => {
       obj[String(Number(g.date.slice(8)))] = g.isWorkday ? (r.days[i] ? etiket[r.days[i]!] ?? r.days[i] : 'G') : '';
     });
-    const absent = r.days.filter((d) => d === 'gelmedi' || d === 'ucretsiz_izin').length;
+    const absent = r.days.filter((d) => d === 'gelmedi' || d === 'ucretsiz_izin' || d === 'issiz_gunu').length;
     const izin = r.days.filter((d) => d === 'yillik_izin' || d === 'mazeret_izni').length;
     obj['Gelmedi'] = absent;
     obj['İzin'] = izin;
@@ -133,6 +133,27 @@ export async function shareMesaiExcel(rows: { name: string; hours: number; pay: 
   await shareWorkbook(wb, `mesai-${ayBasligi.replace(/\s+/g, '-')}.xlsx`);
 }
 
+/** Geçici / Günlük Çalışanlar Excel raporu */
+export async function shareTempWorkersExcel(logs: TempWorkLog[], baslik: string = 'gecici-calisanlar') {
+  const durationLabels: Record<string, string> = {
+    tam_gun: 'Tam Gün',
+    yarim_gun: 'Yarım Gün',
+    saatlik: 'Saatlik',
+  };
+  const data = logs.map((l) => ({
+    'Tarih': l.date,
+    'Çalışan': l.worker_name,
+    'Süre Tipi': durationLabels[l.duration_type] ?? l.duration_type,
+    'Saat': l.hours ?? '',
+    'Günlük/Anlaşılan Ücret': l.daily_wage ?? '',
+    'Ödeme Durumu': l.paid ? 'Ödendi' : 'Ödeme Bekliyor',
+    'Açıklama / İş': l.note ?? '',
+  }));
+  const wb = XLSX.utils.book_new();
+  autoWs(wb, 'Geçici Çalışanlar', data.length > 0 ? data : [{ 'Bilgi': 'Kayıt bulunamadı' }]);
+  await shareWorkbook(wb, `${baslik.replace(/\s+/g, '-')}.xlsx`);
+}
+
 /**
  * Tüm veri yedeği (PLAN 6.8): Excel sayfa sayfa + geri yüklenebilir JSON.
  */
@@ -146,6 +167,17 @@ export async function shareFullBackupExcel(db: DataDB) {
   autoWs(wb, 'Ödemeler', db.debt_payments.map((p) => ({ 'Tarih': p.paid_at, 'Çalışan': p.employee_id, 'Tutar': p.amount, 'Yöntem': p.method })));
   autoWs(wb, 'Özel Günler', db.calendar_events.map((e) => ({ 'Tarih': e.date, 'Tür': e.type, 'Başlık': e.title })));
   autoWs(wb, 'Bordrolar', db.payroll_items.map((i) => ({ 'Çalışan': i.employee_name, 'Net': i.net_payable })));
+  if (db.temp_work_logs && db.temp_work_logs.length > 0) {
+    autoWs(wb, 'Geçici Çalışanlar', db.temp_work_logs.map((t) => ({
+      'Tarih': t.date,
+      'Çalışan': t.worker_name,
+      'Süre': t.duration_type,
+      'Saat': t.hours ?? '',
+      'Ücret': t.daily_wage ?? '',
+      'Ödendi': t.paid ? 'Evet' : 'Hayır',
+      'Not': t.note ?? '',
+    })));
+  }
   await shareWorkbook(wb, `tam-yedek-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 

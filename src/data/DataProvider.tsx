@@ -7,6 +7,7 @@ import { useAuth } from './auth';
 import { useDataStore, useSyncState } from './store';
 import { isSupabaseConfigured, pullAll } from './supabase';
 import { ensureHolidays } from './repo';
+import { syncBreakReminders } from '../utils/notifications';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: Infinity, retry: 1 } },
@@ -61,6 +62,21 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     ensureHolidays(orgId, thisYear).catch(() => undefined);
     ensureHolidays(orgId, thisYear + 1).catch(() => undefined);
   }, [loaded, orgId]);
+
+  // Mola bildirimlerini senkronize et
+  const scheduleCount = useDataStore((s) => s.db.schedule_days.length);
+  useEffect(() => {
+    if (!loaded || !orgId || scheduleCount === 0) return;
+    const st = useDataStore.getState();
+    const schedule = st.db.schedule_days.filter((d) => d.org_id === orgId);
+    const org = st.db.organizations.find((o) => o.id === orgId);
+    const settings = org?.settings;
+    syncBreakReminders(
+      schedule,
+      settings?.breakReminderEnabled !== false,
+      settings?.breakEndReminderEnabled !== false
+    ).catch(() => undefined);
+  }, [loaded, orgId, scheduleCount]);
 
   // Senkron motoru: pullAll — ilk girişte, öne gelince, ağ dönünce, 60 sn'de bir
   useEffect(() => {

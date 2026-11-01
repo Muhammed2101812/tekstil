@@ -116,9 +116,9 @@ export async function sharePusulaPdf(item: PayrollItem, org: PdfOrgInfo, ayBasli
 }
 
 /** Tüm çalışanların pusulaları tek PDF'te */
-export async function sharePayrollPdf(items: PayrollItem[], ayBasligi: string) {
+export async function sharePayrollPdf(items: PayrollItem[], ayBasligi: string, org?: PdfOrgInfo) {
   const html = `<html><head><meta charset="utf-8"><style>${CSS}</style></head><body>
-    ${header({ name: 'Bordro' }, 'Bordro Özeti', ayBasligi)}
+    ${header({ name: org?.name?.trim() || 'Bordro', logoUrl: org?.logoUrl }, 'Bordro Özeti', ayBasligi)}
     <table>
       <thead><tr><th>Çalışan</th><th>Departman</th><th class="num">Taban</th><th class="num">Kesinti</th><th class="num">Mesai</th><th class="num">Taksit</th><th class="num">Net</th></tr></thead>
       <tbody>
@@ -154,7 +154,7 @@ export async function sharePuantajPdf(
 ) {
   const sembol: Record<string, string> = {
     geldi: '✓', gelmedi: 'X', gec_geldi: 'G', erken_cikti: 'E', yarim_gun: 'Y',
-    yillik_izin: 'İ', mazeret_izni: 'M', ucretsiz_izin: 'Ü', rapor: 'R',
+    yillik_izin: 'İ', mazeret_izni: 'M', ucretsiz_izin: 'Ü', issiz_gunu: 'Ş', rapor: 'R',
   };
   const html = `<html><head><meta charset="utf-8"><style>${CSS}</style></head><body>
     ${header(org, 'Puantaj Cetveli', ayBasligi)}
@@ -176,7 +176,7 @@ export async function sharePuantajPdf(
           .join('')}
       </tbody>
     </table>
-    <p class="muted" style="margin-top:10px">✓ Geldi · X Gelmedi · G Geç · E Erken · Y Yarım · İ Yıllık İzin · M Mazeret · Ü Ücretsiz · R Rapor</p>
+    <p class="muted" style="margin-top:10px">✓ Geldi · X Gelmedi · G Geç · E Erken · Y Yarım · İ Yıllık İzin · M Mazeret · Ü Ücretsiz · Ş İşsiz Günü · R Rapor</p>
   </body></html>`;
   await shareHtml(html, `puantaj-${ayBasligi.replace(/\s+/g, '-')}.pdf`);
 }

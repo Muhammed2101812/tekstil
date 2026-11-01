@@ -67,6 +67,7 @@ export default function BordroAy() {
 
   const [liveItems, setLiveItems] = useState<PayrollItem[] | null>(null);
   const [finalConfirm, setFinalConfirm] = useState(false);
+  const [paidAllConfirm, setPaidAllConfirm] = useState(false);
   const [revertOpen, setRevertOpen] = useState(false);
   const [revertReason, setRevertReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -130,6 +131,7 @@ export default function BordroAy() {
   const markPaidAll = async () => {
     if (busy) return;
     setBusy(true);
+    setPaidAllConfirm(false);
     try {
       for (const item of items) {
         const kalan = item.net_payable - item.paid_amount;
@@ -151,8 +153,14 @@ export default function BordroAy() {
     }
   };
 
-  /** Kesintiler maaşı aştıysa farkı borca çevir (PLAN 4.6) */
+  /** Kesintiler maaşı aştıysa farkı borca çevir (PLAN 4.6). Aynı kalem için
+   * ikinci borç oluşturulmaz — kaynak kalem dedup anahtarıdır. */
   const convertUncovered = async (item: PayrollItem) => {
+    const existing = db.debts.find((d) => d.payroll_item_id === item.id);
+    if (existing) {
+      showToast({ message: `${item.employee_name}: fark bu bordro için zaten borç olarak kayıtlı`, tone: 'warning' });
+      return;
+    }
     try {
       await giveDebt({
         employee_id: item.employee_id,
@@ -161,6 +169,7 @@ export default function BordroAy() {
         installments: 1,
         start_month: `${month === 12 ? year + 1 : year}-${String(month + 1 > 12 ? 1 : month + 1).padStart(2, '0')}`,
         description: `${ayAdi(month)} ${year} kesinti farkı`,
+        payroll_item_id: item.id,
       });
       showToast({ message: `${item.employee_name}: fark borç olarak kaydedildi`, tone: 'success' });
     } catch (e) {
@@ -194,8 +203,9 @@ export default function BordroAy() {
                 size="sm"
                 full={false}
                 variant="secondary"
+                disabled={busy}
                 icon={<CheckCheck size={16} color={c.success} />}
-                onPress={markPaidAll}
+                onPress={() => setPaidAllConfirm(true)}
               />
             ) : undefined
           }
@@ -292,7 +302,7 @@ export default function BordroAy() {
 
         {/* Alt eylemler */}
         <View style={{ gap: 10, marginTop: 24 }}>
-          {!finalized ? (
+          {!finalized && (
             <>
               <Button
                 label="Kontrol ettim, Kesinleştir"
@@ -303,48 +313,51 @@ export default function BordroAy() {
                 Kesinleştirme internet ister; taksitler anında borçlardan düşer.
               </Text>
             </>
-          ) : (
-            <>
-              <Button
-                label="Maaş Pusulası PDF (tümü)"
-                variant="secondary"
-                icon={<Share2 size={18} color={c.text} />}
-                onPress={async () => {
-                  try {
-                    const { sharePayrollPdf } = await import('../../../export/pdf');
-                    await sharePayrollPdf(items, `${ayAdi(month)} ${year}`);
-                  } catch (e) {
-                    showToast({ message: e instanceof Error ? e.message : 'PDF paylaşılamadı', tone: 'warning' });
-                  }
-                }}
-              />
-              <Button
-                label="Bordro Özeti Excel"
-                variant="secondary"
-                icon={<FileDown size={18} color={c.text} />}
-                onPress={async () => {
-                  try {
-                    const { shareBordroExcel } = await import('../../../export/excel');
-                    await shareBordroExcel(items, year, month);
-                  } catch (e) {
-                    showToast({ message: e instanceof Error ? e.message : 'Excel paylaşılamadı', tone: 'warning' });
-                  }
-                }}
-              />
-              {isOwner ? (
-                <Button
-                  label="Bordroyu Geri Al"
-                  variant="ghost"
-                  icon={<Undo2 size={18} color={c.danger} />}
-                  onPress={() => setRevertOpen(true)}
-                />
-              ) : (
-                <Text style={[type.small, { color: c.textMuted, textAlign: 'center' }]}>
-                  Geri alma yalnızca firma sahibine açıktır.
-                </Text>
-              )}
-            </>
           )}
+          {/* Kontrol çıktıları taslakta da alınabilir: kesinleştirmeden önce kontrol etmek için */}
+          <Button
+            label="Maaş Pusulası PDF (tümü)"
+            variant="secondary"
+            disabled={items.length === 0}
+            icon={<Share2 size={18} color={c.text} />}
+            onPress={async () => {
+              try {
+                const { sharePayrollPdf } = await import('../../../export/pdf');
+                const org = db.organizations.find((o) => o.id === orgId);
+                await sharePayrollPdf(items, `${ayAdi(month)} ${year}`, { name: org?.name ?? 'Bordro', logoUrl: org?.logo_url ?? null });
+              } catch (e) {
+                showToast({ message: e instanceof Error ? e.message : 'PDF paylaşılamadı', tone: 'warning' });
+              }
+            }}
+          />
+          <Button
+            label="Bordro Özeti Excel"
+            variant="secondary"
+            disabled={items.length === 0}
+            icon={<FileDown size={18} color={c.text} />}
+            onPress={async () => {
+              try {
+                const { shareBordroExcel } = await import('../../../export/excel');
+                await shareBordroExcel(items, year, month);
+              } catch (e) {
+                showToast({ message: e instanceof Error ? e.message : 'Excel paylaşılamadı', tone: 'warning' });
+              }
+            }}
+          />
+          {finalized ? (
+            isOwner ? (
+              <Button
+                label="Bordroyu Geri Al"
+                variant="ghost"
+                icon={<Undo2 size={18} color={c.danger} />}
+                onPress={() => setRevertOpen(true)}
+              />
+            ) : (
+              <Text style={[type.small, { color: c.textMuted, textAlign: 'center' }]}>
+                Geri alma yalnızca firma sahibine açıktır.
+              </Text>
+            )
+          ) : null}
         </View>
       </ScrollView>
 
@@ -355,6 +368,15 @@ export default function BordroAy() {
         message={`${items.length} çalışanın ödemesi dondurulacak, taksitler borçlardan düşülecek ve bu ayın puantajı kilitlenecek.`}
         confirmLabel="Kesinleştir"
         onConfirm={doFinalize}
+      />
+
+      <ConfirmSheet
+        visible={paidAllConfirm}
+        onClose={() => setPaidAllConfirm(false)}
+        title="Hepsini Ödendi İşaretle"
+        message={`${items.filter((i) => i.net_payable - i.paid_amount > 0.005).length} çalışanın kalan ödemesi nakit olarak işaretlenecek. Bankadan ödeneni daha sonra tek tek düzeltebilirsiniz.`}
+        confirmLabel="Tümünü Ödendi İşaretle"
+        onConfirm={markPaidAll}
       />
 
       <ConfirmSheet

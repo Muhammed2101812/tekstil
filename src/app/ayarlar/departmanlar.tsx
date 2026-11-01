@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Plus, Trash2 } from 'lucide-react-native';
-import { ActionSheet, Badge, Button, Card, Header, Screen, TextField, useToast } from '../../ui';
+import { ActionSheet, Badge, Button, Card, ConfirmSheet, Header, Screen, TextField, useToast } from '../../ui';
 import { useTheme } from '../../theme/ThemeProvider';
+import { useDataStore } from '../../data/store';
 import { useDepartments, useEmployees } from '../../data/hooks';
 import { addDepartment, removeDepartment } from '../../data/repo';
 import { AVATAR_RENKLER as RENKLER } from '../../utils/format';
@@ -13,9 +14,21 @@ export default function AyarDepartmanlar() {
   const { showToast } = useToast();
   const departments = useDepartments();
   const employees = useEmployees();
+  const allEvents = useDataStore((s) => s.db.calendar_events);
+  const allScheduleDays = useDataStore((s) => s.db.schedule_days);
   const [name, setName] = useState('');
   const [color, setColor] = useState(RENKLER[0]);
   const [menuId, setMenuId] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  const deleteTarget = departments.find((d) => d.id === deleteId) ?? null;
+  const deleteInfo = deleteTarget
+    ? {
+        employees: employees.filter((e) => e.department_id === deleteTarget.id).length,
+        events: allEvents.filter((e) => e.department_id === deleteTarget.id).length,
+        scheduleDays: allScheduleDays.filter((d) => d.department_id === deleteTarget.id).length,
+      }
+    : null;
 
   return (
     <Screen keyboard>
@@ -92,20 +105,45 @@ export default function AyarDepartmanlar() {
         title={departments.find((d) => d.id === menuId)?.name}
         actions={[
           {
-            label: 'Sil (çalışanlar departmansız kalır)',
+            label: 'Sil',
             icon: <Trash2 size={20} color={c.danger} />,
             destructive: true,
-            onPress: async () => {
+            onPress: () => {
               if (!menuId) return;
-              try {
-                await removeDepartment(menuId);
-                showToast({ message: 'Departman silindi', tone: 'success' });
-              } catch (e) {
-                showToast({ message: e instanceof Error ? e.message : 'Departman silinemedi', tone: 'warning' });
-              }
+              setDeleteId(menuId);
+              setMenuId(null);
             },
           },
         ]}
+      />
+
+      {/* Departmana bağlı takvim/olay kayıtları FK zinciriyle silineceği için sonuçlar onaylatılır */}
+      <ConfirmSheet
+        visible={!!deleteTarget}
+        onClose={() => setDeleteId(null)}
+        title="Departmanı Sil"
+        message={
+          deleteInfo && deleteTarget
+            ? `"${deleteTarget.name}" silinecek. Bağlı ${deleteInfo.employees} çalışanın departmanı boşalır${
+                deleteInfo.events + deleteInfo.scheduleDays > 0
+                  ? `; departmana özel ${deleteInfo.events + deleteInfo.scheduleDays} takvim/olay kaydı da silinir.`
+                  : '.'
+              }`
+            : ''
+        }
+        confirmLabel="Sil"
+        destructive
+        onConfirm={async () => {
+          if (!deleteId) return;
+          try {
+            await removeDepartment(deleteId);
+            showToast({ message: 'Departman silindi', tone: 'success' });
+          } catch (e) {
+            showToast({ message: e instanceof Error ? e.message : 'Departman silinemedi', tone: 'warning' });
+          } finally {
+            setDeleteId(null);
+          }
+        }}
       />
     </Screen>
   );

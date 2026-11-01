@@ -7,8 +7,9 @@ Tekstil atölyesi sahibi/muhasebecisi için personel, puantaj, avans-borç ve
 ## Özellikler
 
 - **Personel:** çalışan kartları, departmanlar, maaş geçmişi/zam, işten çıkış, TCKN/IBAN doğrulama
-- **Puantaj:** günlük yoklama (geldi/gelmedi/geç/erken/yarım gün/izin/rapor), toplu işlem,
+- **Puantaj:** günlük yoklama (geldi/gelmedi/geç/erken/yarım gün/izin/rapor/işsiz günü), toplu işlem,
   gün tamamlama, ay ısı haritası; tatil günlerinde yoklama girilmez
+- **Geçici çalışan:** günlük/yevmiye çalışan kaydı (tam gün/yarım gün/saatlik, ödeme takibi)
 - **Çalışma takvimi:** haftalık program + molalar, resmî tatiller (2026–2030 gömülü),
   arife yarım günleri, ücretli/ücretsiz firma tatili, hafta sonu ek çalışma planlama
 - **Avans & Borç:** taksitlendirme (önce eski borç kapanır), elden tahsilat, ödeme çizelgesi
@@ -19,25 +20,22 @@ Tekstil atölyesi sahibi/muhasebecisi için personel, puantaj, avans-borç ve
 - **Raporlar:** puantaj cetveli, bordro özeti, pusula PDF'i, borç/mesai/izin Excel'leri,
   devamsızlık analizi, tam yedek (Excel + **geri yüklenebilir JSON**)
 - **Güvenlik:** Supabase RLS (firma izolasyonu), uygulama kilidi (biyometrik + PIN),
-  audit log, hesap silme (Play zorunluluğu), 6 haneli davet kodları
-- **Çevrimdışı:** önce-yerele-yaz + idempotent senkron kuyruğu (UUID upsert),
-  çevrimdışı şeridi, iyimser arayüz
+  audit log, hesap silme (Play zorunluluğu), doğrudan kullanıcı yönetimi
+- **Çevrimiçi mimari:** önce-sunucuya-yaz (remote-first), deterministik UUID ile
+  idempotent upsert, 60 saniyede bir artımlı senkron
 
-## İki çalışma modu
+## Çalışma modu
 
-| Mod | Ne zaman | Veri |
-|---|---|---|
-| **Cihaz modu** | `.env` boşsa (varsayılan) | Yalnızca telefonda (JSON dosya) — anında deneme için |
-| **Supabase modu** | `.env` doluysa | Bulut + offline kuyruk + çift yönlü senkron |
-
-Cihaz modunda kayıt/giriş yereldir (tek cihaz). Buluta geçmek için `supabase/README.md`'deki
+Uygulama **tamamen çevrimiçidir** (Supabase zorunlu). `.env` dosyası boşsa uygulama
+açılışta yapılandırma hatası ekranı gösterir; yerel cihaz modu kaldırılmıştır
+(mimari kararlar için `agent.md`'ye bakın). Buluta kurmak için `supabase/README.md`'deki
 adımları izleyin: iki proje (dev/prod) → `db push` → `.env` → `gen types`.
 
 ## Kurulum
 
 ```bash
 npm install
-cp .env.example .env        # Supabase kullanacaksanız doldurun
+cp .env.example .env        # ZORUNLU: Supabase URL + anon key doldurun
 npx expo start              # Expo Go ile telefonda açın
 ```
 
@@ -46,7 +44,7 @@ npx expo start              # Expo Go ile telefonda açın
 ```bash
 npx tsc --noEmit            # tip kontrolü
 npx expo lint               # lint (0 hata)
-npx jest                    # 40 test: domain(24) + veri katmanı(4) + bileşen/doğrulama(12)
+npx jest                    # 108 test: domain(72) + bordro-katmanı(9) + veri(17) + bileşen(10)
 npx expo export --platform android   # paketleme kontrolü
 # Supabase'li RLS testleri (uzak proje gerekir):
 SUPABASE_TEST_URL=… SUPABASE_TEST_ANON_KEY=… npx jest supabase/tests
@@ -76,8 +74,8 @@ src/
 │   ├── payroll   # aylık net maaş birleştirici
 │   ├── debts     # taksit önerisi + eski-borç-önce dağıtımı
 │   └── leave     # yıllık izin hakkı
-├── data/         # offline-first depo (zustand + dosya), repo işlemleri,
-│                 # idempotent senkron kuyruğu, auth (Supabase|cihaz)
+├── data/         # Supabase istemcisi + bellek içi zustand aynası, repo işlemleri,
+│                 # remote-first yazma, artımlı senkron (pullAll), auth (Supabase)
 ├── ui/           # tasarım sistemi bileşenleri (açık/koyu tema)
 ├── features/     # ekran-yardımcısı bileşenler (durum sayfası, bordro hesap)
 ├── export/       # PDF (expo-print) · Excel (xlsx) · JSON yedek/geri yükleme
@@ -85,8 +83,8 @@ src/
 ├── state/        # küçük arayüz tercihleri (tema, kilit)
 └── utils/        # para/tarih biçimleri, TCKN/IBAN, zod şemaları, bildirim
 supabase/
-├── migrations/   # 0001 şema → 0002 RLS → 0003 RPC → 0004 audit
-├── functions/    # delete-account (Edge)
+├── migrations/   # 0001 şema → 0002 RLS → 0003 RPC → 0004 audit → … → 0012 işsiz günü → 0013 updated_at (INSERT)
+├── functions/    # delete-account, admin-create-user, admin-set-password (Edge)
 └── tests/        # RLS + finalize atomiklik testleri (uzak proje)
 ```
 
@@ -103,8 +101,10 @@ supabase/
 
 ## Bilinen sınırlar / yol haritası
 
-- Uygulama ikonu/feature graphic hâlen Expo varsayılanı — PLAN 7.6'daki
-  "makara + onay" logosu kullanıcı onayına bağlı (Faz 0 mockup kararı).
+- Uygulama tamamen çevrimiçidir; çevrimdışı yazma kuyruğu planlı bir sonraki
+  fazdır (bkz. `docs/KAPSAMLI_DENETIM_VE_MASTER_PLAN.md`).
 - RLS testleri uzak Supabase projesi ister; ortam değişkeni yoksa atlanır.
-- Hata izleme (Sentry) ve Play çıkış adımları Faz 6–7 kapsamındadır.
-- Tek cihazlı "cihaz modu" senkron sunmaz; cihaz değiştirmek için JSON yedek/geri yükleme kullanılır.
+- Hata izleme (Sentry) ve OTA (expo-updates) planlı fazlardadır.
+- Cihaz değiştirmek için JSON yedek/geri yükleme kullanılır (Ayarlar → Yedek & Hesap).
+- Kapsamlı denetim bulguları ve yol haritası:
+  [`docs/KAPSAMLI_DENETIM_VE_MASTER_PLAN.md`](docs/KAPSAMLI_DENETIM_VE_MASTER_PLAN.md).

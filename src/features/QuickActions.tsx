@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { HandCoins, Clock4, CalendarOff, UserPlus, CalendarPlus, Layers } from 'lucide-react-native';
+import { HandCoins, Clock4, CalendarOff, UserPlus, CalendarPlus, Layers, UserCheck } from 'lucide-react-native';
 import { BottomSheet, TextField, STATUS_META , useToast } from '../ui';
 import { useTheme } from '../theme/ThemeProvider';
-import { useEmployees, useDayAttendance, useSchedule, useEvents } from '../data/hooks';
+import { useEmployees, useDayAttendance, useSchedule, useEvents, usePayroll } from '../data/hooks';
 import { markAttendance, addOvertime } from '../data/repo';
 import { getDayPlan, todayISO } from '../domain/schedule';
 import { hapticSuccess } from '../utils/haptics';
+import { AttendanceStatus } from '../types';
 
 /**
  * ➕ Hızlı işlem sayfası (PLAN 6.1): en sık işler her ekrandan 2 dokunuşla.
@@ -23,18 +24,23 @@ export function QuickActionsSheet({ visible, onClose }: { visible: boolean; onCl
   const events = useEvents();
   const { byEmployee } = useDayAttendance(todayISO());
   const day = todayISO();
+  const payroll = usePayroll(Number(day.slice(0, 4)), Number(day.slice(5, 7)));
+  const payrollLocked = payroll?.status === 'kesinlesti' || payroll?.status === 'odendi';
 
   // Hızlı mesainin çarpanı günün türüne göre belirlenir (resmî tatil ×2, hafta sonu ×1,5)
   const dayPlan = getDayPlan(day, schedule, events);
   const overtimeKind = dayPlan.kind === 'resmi_tatil' ? 'resmi_tatil' : dayPlan.isWorkday ? 'hafta_ici' : 'hafta_sonu';
 
-  const actions = [
+  const actions: { label: string; desc: string; icon: React.ReactNode; bg: string; disabled?: boolean; onPress: () => void }[] = [
     {
       label: 'Avans Ver',
       desc: 'Taksitli veya tek seferde',
       icon: <HandCoins size={24} color={c.primary} />,
       bg: c.primarySoft,
-      onPress: () => router.push('/avans-ver'),
+      onPress: () => {
+        onClose();
+        router.push('/avans-ver');
+      },
     },
     {
       label: 'Mesai Ekle',
@@ -48,14 +54,24 @@ export function QuickActionsSheet({ visible, onClose }: { visible: boolean; onCl
       desc: 'Bugün için',
       icon: <CalendarOff size={24} color={c.primary} />,
       bg: c.primarySoft,
-      onPress: () => setLeaveOpen(true),
+      disabled: payrollLocked,
+      onPress: () => {
+        if (payrollLocked) {
+          showToast({ message: 'Bu ay bordro kesinleşmiş; puantaj kilitli.', tone: 'warning' });
+          return;
+        }
+        setLeaveOpen(true);
+      },
     },
     {
       label: 'Çalışan Ekle',
       desc: 'Yeni personel',
       icon: <UserPlus size={24} color={c.success} />,
       bg: c.successSoft,
-      onPress: () => router.push('/personel/duzenle'),
+      onPress: () => {
+        onClose();
+        router.push('/personel/duzenle');
+      },
     },
     {
       label: 'Üretim / Parti',
@@ -68,11 +84,24 @@ export function QuickActionsSheet({ visible, onClose }: { visible: boolean; onCl
       },
     },
     {
+      label: 'Geçici / Günlük Çalışan',
+      desc: 'Yevmiye ve yardım not al',
+      icon: <UserCheck size={24} color={c.primary} />,
+      bg: c.primarySoft,
+      onPress: () => {
+        onClose();
+        router.push('/gecici-calisan' as never);
+      },
+    },
+    {
       label: 'Ek Çalışma Günü',
       desc: 'Hafta sonu / tatil planla',
       icon: <CalendarPlus size={24} color={c.accent} />,
       bg: c.accentSoft,
-      onPress: () => router.push('/ek-calisma'),
+      onPress: () => {
+        onClose();
+        router.push('/ek-calisma');
+      },
     },
   ];
 
@@ -86,7 +115,7 @@ export function QuickActionsSheet({ visible, onClose }: { visible: boolean; onCl
               onPress={a.onPress}
               style={({ pressed }) => [
                 styles.action,
-                { backgroundColor: c.surface, borderColor: c.border, borderRadius: radius.card, opacity: pressed ? 0.85 : 1 },
+                { backgroundColor: c.surface, borderColor: c.border, borderRadius: radius.card, opacity: a.disabled ? 0.5 : pressed ? 0.85 : 1 },
               ]}
               accessibilityRole="button"
               accessibilityLabel={a.label}
@@ -101,7 +130,7 @@ export function QuickActionsSheet({ visible, onClose }: { visible: boolean; onCl
         </View>
       </BottomSheet>
 
-      <EmployeePickSheet
+      <EmployeePickSheet<AttendanceStatus>
         visible={leaveOpen}
         onClose={() => {
           setLeaveOpen(false);
@@ -115,7 +144,7 @@ export function QuickActionsSheet({ visible, onClose }: { visible: boolean; onCl
         }}
         onPick={async (emp, status) => {
           try {
-            await markAttendance(day, [{ employee_id: emp.id, status: status as never }]);
+            await markAttendance(day, [{ employee_id: emp.id, status }]);
             hapticSuccess();
             showToast({ message: `${emp.full_name}: izin kaydedildi`, tone: 'success' });
           } catch (e) {
@@ -125,7 +154,7 @@ export function QuickActionsSheet({ visible, onClose }: { visible: boolean; onCl
         statusOptions={['yillik_izin', 'mazeret_izni', 'ucretsiz_izin', 'rapor']}
       />
 
-      <EmployeePickSheet
+      <EmployeePickSheet<number>
         visible={overtimeOpen}
         onClose={() => {
           setOvertimeOpen(false);
@@ -135,7 +164,7 @@ export function QuickActionsSheet({ visible, onClose }: { visible: boolean; onCl
         employees={employees}
         onPick={async (emp, hours) => {
           try {
-            await addOvertime({ employee_id: emp.id, day, hours: Number(hours), kind: overtimeKind });
+            await addOvertime({ employee_id: emp.id, day, hours, kind: overtimeKind });
             hapticSuccess();
             showToast({ message: `${emp.full_name}: ${hours} saat mesai`, tone: 'success' });
           } catch (e) {
@@ -148,8 +177,12 @@ export function QuickActionsSheet({ visible, onClose }: { visible: boolean; onCl
   );
 }
 
-/** Çalışan seç → uygula alt sayfası (izin ve mesai hızlı akışları) */
-export function EmployeePickSheet({
+/**
+ * Çalışan seç → uygula alt sayfası (izin ve mesai hızlı akışları).
+ * TValue: onPick'e düşen değerin türü (AttendanceStatus veya number) —
+ * çağrı yeri `<EmployeePickSheet<AttendanceStatus>` gibi sabitler.
+ */
+export function EmployeePickSheet<TValue extends AttendanceStatus | number = AttendanceStatus | number>({
   visible,
   onClose,
   title,
@@ -164,8 +197,8 @@ export function EmployeePickSheet({
   onClose: () => void;
   title: string;
   employees: { id: string; full_name: string }[];
-  onPick: (emp: { id: string; full_name: string }, value: string | number) => void | Promise<void>;
-  statusOptions?: string[];
+  onPick: (emp: { id: string; full_name: string }, value: TValue) => void | Promise<void>;
+  statusOptions?: AttendanceStatus[];
   hourOptions?: number[];
   renderStatus?: (emp: { id: string }) => string | null;
   /** Verildiyse satıra dokunmak doğrudan seçer (ikinci adım açılmaz) */
@@ -220,7 +253,7 @@ export function EmployeePickSheet({
               key={s}
               onPress={async () => {
                 try {
-                  await onPick(picked, s);
+                  await onPick(picked, s as TValue);
                 } finally {
                   close();
                 }
@@ -230,9 +263,7 @@ export function EmployeePickSheet({
                 { borderRadius: radius.md, backgroundColor: pressed ? c.surfaceSubtle : c.surface, borderColor: c.border },
               ]}
             >
-              <Text style={[type.body, { color: c.text }]}>
-                {STATUS_META[s as keyof typeof STATUS_META]?.label ?? s}
-              </Text>
+              <Text style={[type.body, { color: c.text }]}>{STATUS_META[s]?.label ?? s}</Text>
             </Pressable>
           ))}
         </View>
@@ -243,7 +274,7 @@ export function EmployeePickSheet({
               key={h}
               onPress={async () => {
                 try {
-                  await onPick(picked, h);
+                  await onPick(picked, h as TValue);
                 } finally {
                   close();
                 }

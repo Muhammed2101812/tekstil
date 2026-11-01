@@ -28,8 +28,7 @@
       "permissions": [
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
-        "android.permission.VIBRATE",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.VIBRATE"
       ]
     },
     "web": {
@@ -52,7 +51,8 @@
         "expo-image-picker",
         {
           "photosPermission": "Çalışan fotoğrafı eklemek için galerinize erişim gerekir.",
-          "cameraPermission": "Çalışan fotoğrafı çekmek için kameraya erişim gerekir."
+          "cameraPermission": "Çalışan fotoğrafı çekmek için kameraya erişim gerekir.",
+          "androidRecordAudioPermission": false
         }
       ],
       [

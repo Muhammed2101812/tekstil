@@ -32,7 +32,11 @@ export function calculateDebtBalance(debt: Debt, payments: DebtPayment[], curren
     return { debt, totalPaid, remaining, isFullyPaid: false, suggestedInstallment: remaining };
   }
   const standard = round2(debt.amount / debt.installments);
-  return { debt, totalPaid, remaining, isFullyPaid: false, suggestedInstallment: Math.min(standard, remaining) };
+  // Kuruş yuvarlama artığı son taksitte kapanır: kalan, standart taksit + toplam
+  // yuvarlama farkından küçük/eşitse borç bu ay tamamıyla kapatılır (fazladan ay oluşmaz).
+  const roundingResidue = Math.max(0, round2(debt.amount - standard * debt.installments));
+  const suggested = remaining <= round2(standard + roundingResidue) ? remaining : Math.min(standard, remaining);
+  return { debt, totalPaid, remaining, isFullyPaid: false, suggestedInstallment: suggested };
 }
 
 /** Açık borçlar, eski veriliş tarihi önce gelecek şekilde sıralı */

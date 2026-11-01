@@ -46,6 +46,7 @@ const NUMERIC_FIELDS: Partial<Record<keyof DataDB, string[]>> = {
   calendar_events: ['multiplier'],
   payrolls: [],
   production_batches: ['quantity'],
+  temp_work_logs: ['hours', 'daily_wage'],
 };
 
 function toNumbers(table: keyof DataDB, row: Record<string, unknown>): Record<string, unknown> {
@@ -84,8 +85,18 @@ export async function remoteUpsert<T extends keyof DataDB>(
  */
 export async function remoteDelete(table: keyof DataDB, ids: string[]): Promise<void> {
   if (ids.length === 0) return;
-  const { error } = await supabase.from(table).delete().in('id', ids);
+  // RLS'te yetkisiz silme (örn. admin üyede owner-only DELETE politikası —
+  // 0007_data_protection.sql) HATA döndürmez; 0 satır etkilenir. Sessiz veri
+  // kaybını önlemek için silinen satırlar geri istenir (üyenin SELECT yetkisi
+  // vardır) ve dönen sayı beklenenle eşleşmezse işlem başarısız sayılır —
+  // yerel store'a dokunulmaz.
+  const { data, error } = await supabase.from(table).delete().select('id').in('id', ids);
   if (error) throw new Error(error.message);
+  if ((data?.length ?? 0) !== ids.length) {
+    throw new Error(
+      `Silme doğrulanamadı: ${ids.length} kayıttan ${data?.length ?? 0} tanesi silinebildi (yetki eksik olabilir).`
+    );
+  }
   useDataStore.getState().remove(table, ids);
 }
 
@@ -112,7 +123,7 @@ export async function pullAll(): Promise<{ pulled: number; ok: boolean }> {
     'organizations', 'org_members', 'departments', 'schedule_days',
     'calendar_events', 'employees', 'employee_salaries', 'attendance', 'attendance_days',
     'overtime', 'debts', 'debt_payments', 'leave_adjustments', 'payrolls',
-    'payroll_items', 'salary_payments', 'production_batches',
+    'payroll_items', 'salary_payments', 'production_batches', 'temp_work_logs',
   ];
   let threshold = '1970-01-01T00:00:00Z';
   const hasLocalData = (useDataStore.getState().db.employees?.length ?? 0) > 0;
@@ -169,9 +180,43 @@ export async function pullAll(): Promise<{ pulled: number; ok: boolean }> {
       pulled += data.length;
     }
   }
+  // ─── Uzak silmelerin eşitlenmesi (yalnız attendance) ─────────────────────
+  // Artımlı gt(updated_at) çekimi uzaktan SİLİNEN satırları göremez; silinen
+  // kayıtlar yerelde kalırdı. Savunmacı mutabakat: firmanın uzaktaki satır
+  // sayısı, artımlı tur sonrası oluşacak yerel sayıyla tutmuyorsa o firmanın
+  // tüm yoklaması yeniden çekilip yerel dilim olduğu gibi DEĞİŞTİRİLİR.
+  // Sayım sorgusu başarısızsa mutabakat atlanır — senkron asla bloklanmaz.
+  const orgId = useDataStore.getState().orgId;
+  if (orgId) {
+    try {
+      const effectiveLocal = ((patch.attendance ?? useDataStore.getState().db.attendance) as { org_id: string }[])
+        .filter((a) => a.org_id === orgId).length;
+      const { count, error: countErr } = await supabase
+        .from('attendance')
+        .select('id', { count: 'exact', head: true })
+        .eq('org_id', orgId);
+      if (!countErr && typeof count === 'number' && count !== effectiveLocal) {
+        const { data: full, error: fullErr } = await supabase
+          .from('attendance')
+          .select('*')
+          .eq('org_id', orgId);
+        if (!fullErr && full) {
+          patch.attendance = full as never;
+          pulled += full.length;
+        }
+      }
+    } catch {
+      // mutabakat best-effort — senkron turunu etkilemez
+    }
+  }
+
   if (Object.keys(patch).length > 0) {
     useDataStore.getState().replaceDB({ ...useDataStore.getState().db, ...patch });
   }
-  await AsyncStorage.setItem(LAST_SYNC_KEY, new Date().toISOString());
+  // İmleç yalnız tamamen hatasız turda ilerler: hatalı tablodaki satırlar bir
+  // sonraki çekimde (5 dk tolerans penceresiyle) yeniden denenir, kalıcı kaçmaz.
+  if (!hadError) {
+    await AsyncStorage.setItem(LAST_SYNC_KEY, new Date().toISOString());
+  }
   return { pulled, ok: !hadError };
 }

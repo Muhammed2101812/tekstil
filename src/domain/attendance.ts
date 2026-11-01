@@ -182,6 +182,22 @@ export function evaluateAttendanceDay(
       };
     }
 
+    // İşsiz günü: atölyede iş yoktu — ücret kesintisi ücretsiz izinle aynı,
+    // ancak kişisel izinden ayrıdır (bordroda kendi kaleminde toplanır).
+    case 'issiz_gunu': {
+      const deduction = round2(planned * hourlyRate);
+      return {
+        status: 'issiz_gunu',
+        missedHours: planned,
+        deduction,
+        lateMinutes: 0,
+        earlyLeaveMinutes: 0,
+        isUnexcused: false,
+        isFullAbsence: true,
+        description: `İşsiz günü (${planned} saat × ${hourlyRate.toFixed(2)} ₺ = −${deduction.toFixed(2)} ₺)`,
+      };
+    }
+
     case 'rapor': {
       if (!settings.deductSickLeave || raporEmployerPaid) {
         return NO_IMPACT('rapor', 'Raporlu (maaştan kesilmedi)');
@@ -201,14 +217,17 @@ export function evaluateAttendanceDay(
   }
 }
 
-/** Bir aydaki puantaj özet sayıları (ekran üstü rozetleri) */
-export function summarizeAttendance(records: AttendanceRecord[], employeeIds: string[]) {
-  const byStatus = new Map<AttendanceStatus, number>();
-  let recorded = 0;
-  for (const r of records) {
-    if (!employeeIds.includes(r.employee_id)) continue;
-    recorded += 1;
-    byStatus.set(r.status, (byStatus.get(r.status) ?? 0) + 1);
-  }
-  return { recorded, byStatus };
+export type AttendanceCategory = 'present' | 'absent' | 'leave' | 'unpaid';
+
+/**
+ * Maps an attendance status to the shared buckets used by the Home summary
+ * chips and the Puantaj day-summary pills so both screens agree.
+ * gelmedi → absent; yillik_izin/mazeret_izni/rapor → leave;
+ * issiz_gunu/ucretsiz_izin → unpaid; everything else → present.
+ */
+export function categorizeAttendance(status: AttendanceStatus): AttendanceCategory {
+  if (status === 'gelmedi') return 'absent';
+  if (status === 'yillik_izin' || status === 'mazeret_izni' || status === 'rapor') return 'leave';
+  if (status === 'issiz_gunu' || status === 'ucretsiz_izin') return 'unpaid';
+  return 'present';
 }

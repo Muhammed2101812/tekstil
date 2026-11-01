@@ -3,12 +3,15 @@ import { isRunningInExpoGo } from 'expo';
 
 /**
  * Yerel zamanlanmış bildirimler (PLAN 6.9 Bildirimler) — sunucu gerekmez.
- * Günlük yoklama hatırlatması + maaş günü hatırlatması.
+ * Günlük yoklama hatırlatması + haftalık JSON yedek hatırlatması + mola saatleri.
+ * (Maaş günü hatırlatması yoktur.)
  *
  * Not: Expo Go Android'de SDK 53+ itibarıyla expo-notifications doğrudan yüklenemez
  * (hata fırlatır). Bu nedenle Expo Go Android'de güvenli fallback kullanılır,
  * Development Build ve iOS'ta normal çalışır.
  */
+
+import { ScheduleDay } from '../types';
 
 type NotificationsModule = typeof import('expo-notifications');
 let Notifications: NotificationsModule | null = null;
@@ -23,7 +26,7 @@ if (canUseNotifications) {
       handleNotification: async () => ({
         shouldShowBanner: true,
         shouldShowList: true,
-        shouldPlaySound: false,
+        shouldPlaySound: true,
         shouldSetBadge: false,
       }),
     });
@@ -38,6 +41,11 @@ export async function setupNotifications() {
       await Notifications.setNotificationChannelAsync('hatirlatmalar', {
         name: 'Hatırlatmalar',
         importance: Notifications.AndroidImportance.DEFAULT,
+      });
+      await Notifications.setNotificationChannelAsync('mola-bildirimleri', {
+        name: 'Mola Saatleri',
+        importance: Notifications.AndroidImportance.HIGH,
+        enableVibrate: true,
       });
     } catch {
       // ignore
@@ -110,6 +118,93 @@ export async function scheduleWeeklyBackupReminder(enabled: boolean) {
         minute: 0,
       },
     });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Haftalık mola saatleri bildirimleri (başlangıç ve opsiyonel iş başı).
+ * ScheduleDay.weekday: 1=Pzt..7=Paz -> expo-notifications weekly: 1=Pazar, 2=Pzt..7=Cmt
+ */
+export async function syncBreakReminders(
+  scheduleDays: ScheduleDay[],
+  enabled = true,
+  endEnabled = true
+): Promise<boolean> {
+  if (!Notifications || Platform.OS === 'web') return false;
+  try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync().catch(() => []);
+    const breakNotifs = scheduled.filter((n) => n.identifier.startsWith('break-reminder-'));
+    for (const n of breakNotifs) {
+      await Notifications.cancelScheduledNotificationAsync(n.identifier).catch(() => undefined);
+    }
+
+    if (!enabled) return true;
+
+    const granted = await requestNotificationPermission();
+    if (!granted) return false;
+
+    const workdays = scheduleDays.filter(
+      (d) => d.is_workday && Array.isArray(d.breaks) && d.breaks.length > 0
+    );
+
+    let count = 0;
+    const MAX_BREAK_NOTIFICATIONS = 50; // iOS 64 yerel bildirim sınırı güvenliği
+
+    for (const day of workdays) {
+      // 1 (Pzt) -> 2, ..., 6 (Cmt) -> 7, 7 (Paz) -> 1
+      const expoWeekday = (day.weekday % 7) + 1;
+
+      for (let i = 0; i < day.breaks.length; i++) {
+        const brk = day.breaks[i];
+        if (!brk.start || !brk.start.includes(':')) continue;
+        if (count >= MAX_BREAK_NOTIFICATIONS) break;
+
+        const [startH, startM] = brk.start.split(':').map(Number);
+        const name = brk.name?.trim() || 'Mola';
+
+        await Notifications.scheduleNotificationAsync({
+          identifier: `break-reminder-${day.weekday}-${i}-start`,
+          content: {
+            title: `☕ Mola Vakti: ${name}`,
+            body: `${brk.start}${brk.end ? '–' + brk.end : ''} molası başladı.`,
+            sound: true,
+            data: { type: 'break_start', weekday: day.weekday, breakIndex: i },
+          },
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+            weekday: expoWeekday,
+            hour: startH,
+            minute: startM,
+            channelId: 'mola-bildirimleri',
+          },
+        }).catch(() => undefined);
+        count++;
+
+        if (endEnabled && brk.end && brk.end.includes(':') && count < MAX_BREAK_NOTIFICATIONS) {
+          const [endH, endM] = brk.end.split(':').map(Number);
+          await Notifications.scheduleNotificationAsync({
+            identifier: `break-reminder-${day.weekday}-${i}-end`,
+            content: {
+              title: `🔔 Mola Bitti: ${name}`,
+              body: `${name} molası sona erdi, iş başı vakti.`,
+              sound: true,
+              data: { type: 'break_end', weekday: day.weekday, breakIndex: i },
+            },
+            trigger: {
+              type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+              weekday: expoWeekday,
+              hour: endH,
+              minute: endM,
+              channelId: 'mola-bildirimleri',
+            },
+          }).catch(() => undefined);
+          count++;
+        }
+      }
+    }
     return true;
   } catch {
     return false;

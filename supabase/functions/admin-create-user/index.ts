@@ -1,9 +1,10 @@
 // Supabase Edge Function: Firma sahibi (owner) doğrudan kullanıcı oluşturur.
 // auth.admin.createUser service_role gerektirdiğinden bu işlem yalnızca burada
 // yapılır; istemci anon anahtarla çağırır, JWT ile owner yetkisi doğrulanır.
-// Yetim hesap kurtarma: e-posta auth.users'ta var ama hiçbir firmaya üye değilse
-// hesap yeniden kullanılır (şifre/ad güncellenir). 1:1 kuralı: bir kullanıcı
-// aynı anda tek firmada üye olabilir (org_members.user_id UNIQUE).
+// Güvenlik kuralı: Sahibi olduğu doğrulanmamış bir hesabın şifresi ASLA
+// değiştirilmez. E-posta auth.users'ta varsa (firmasız "yetim" hesap) yalnızca
+// üyelik satırı eklenir; kişi kendi mevcut şifresiyle giriş yapar. 1:1 kuralı:
+// bir kullanıcı aynı anda tek firmada üye olabilir (org_members.user_id UNIQUE).
 // Deploy: npx supabase functions deploy admin-create-user
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -38,11 +39,20 @@ Deno.serve(async (req: Request) => {
     const { name, email, password, role } = await req.json();
     const cleanEmail = String(email ?? '').trim().toLowerCase();
     const cleanName = String(name ?? '').trim();
+    const cleanPassword = typeof password === 'string' ? password : '';
 
+    // RFC 5321 pratik sınırı: yerel kısım ≤64, toplam ≤254 karakter
+    const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
     if (cleanName.length < 2) return json({ error: 'Ad en az 2 karakter olmalıdır' }, 400);
-    if (!cleanEmail.includes('@')) return json({ error: 'Geçerli bir e-posta giriniz' }, 400);
-    if (!password || String(password).length < 6) {
+    if (cleanName.length > 100) return json({ error: 'Ad en fazla 100 karakter olmalıdır' }, 400);
+    if (cleanEmail.length > 254 || !EMAIL_RE.test(cleanEmail)) {
+      return json({ error: 'Geçerli bir e-posta giriniz' }, 400);
+    }
+    if (cleanPassword.length < 6) {
       return json({ error: 'Şifre en az 6 karakter olmalıdır' }, 400);
+    }
+    if (cleanPassword.length > 128) {
+      return json({ error: 'Şifre en fazla 128 karakter olmalıdır' }, 400);
     }
     if (role !== 'owner' && role !== 'admin') return json({ error: 'Geçersiz rol' }, 400);
 
@@ -64,11 +74,12 @@ Deno.serve(async (req: Request) => {
       }).eq('user_id', caller.id).eq('org_id', callerMember.org_id);
     }
 
-    // 4. E-posta auth.users'ta var mı? (yetim hesap kurtarma)
+    // 4. E-posta auth.users'ta var mı?
     const { data: existingUserId } = await admin.rpc('get_user_id_by_email', { p_email: cleanEmail });
 
     let targetUserId: string;
     let isNewlyCreated = false;
+    let existingAccount = false;
 
     if (existingUserId) {
       // 1:1 kontrolü: başka bir firmaya üyeyse reddet
@@ -82,25 +93,20 @@ Deno.serve(async (req: Request) => {
         return json({ error: 'Bu e-posta adresi zaten aktif bir şirkete kayıtlı' }, 422);
       }
 
-      // Yetim/eski hesap: şifresini ve adını güncelle, yeniden kullan
-      const { error: updateErr } = await admin.auth.admin.updateUserById(existingUserId, {
-        password,
-        email_confirm: true,
-        user_metadata: { name: cleanName },
-      });
-      if (updateErr) {
-        return json({ error: 'Mevcut hesap güncellenemedi: ' + updateErr.message }, 500);
-      }
+      // Mevcut hesap: SAHİPLİĞİ DOĞRULANMADIĞI için şifre/ad ASLA değiştirilmez;
+      // yalnızca üyelik satırı eklenir. Kişi kendi şifresiyle giriş yapar.
       targetUserId = existingUserId;
+      existingAccount = true;
     } else {
       const { data: created, error: createErr } = await admin.auth.admin.createUser({
         email: cleanEmail,
-        password,
+        password: cleanPassword,
         email_confirm: true,
         user_metadata: { name: cleanName },
       });
       if (createErr || !created.user) {
-        return json({ error: createErr?.message || 'Kullanıcı oluşturulamadı' }, 422);
+        // Ham upstream hatası istemciye sızmaz — nötr Türkçe mesaj döner
+        return json({ error: 'Kullanıcı hesabı açılamadı; e-posta veya şifre geçersiz olabilir.' }, 422);
       }
       targetUserId = created.user.id;
       isNewlyCreated = true;
@@ -118,19 +124,19 @@ Deno.serve(async (req: Request) => {
     });
 
     if (insertErr) {
-      // Yeni açılan auth hesabını geri al (rollback)
+      // Yeni açılan auth hesabını geri al (rollback); mevcut hesaba dokunulmadı
       if (isNewlyCreated) {
         await admin.auth.admin.deleteUser(targetUserId).catch(() => undefined);
       }
-      return json({ error: 'Şirket üyeliği oluşturulamadı: ' + insertErr.message }, 500);
+      return json({ error: 'Şirket üyeliği oluşturulamadı; tekrar deneyin.' }, 500);
     }
 
     // İstemci anında listede görsün diye satırı olduğu gibi döndür
     const { data: member } = await admin.from('org_members').select('*').eq('id', memberId).maybeSingle();
-    return json({ userId: targetUserId, member }, 200);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Sunucu hatası';
-    return json({ error: msg }, 500);
+    return json({ userId: targetUserId, member, existing: existingAccount }, 200);
+  } catch (_err) {
+    // Beklenmeyen hata ayrıntıları (upstream mesajı, yığın izi) sızamaz
+    return json({ error: 'Sunucu hatası; tekrar deneyin.' }, 500);
   }
 });
 

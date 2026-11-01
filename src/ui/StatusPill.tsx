@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { Check, Clock, X, AlertCircle, MinusCircle, Sun, Heart, PauseCircle, Stethoscope } from 'lucide-react-native';
+import { Check, Clock, X, AlertCircle, MinusCircle, Sun, Heart, PauseCircle, PowerOff, Stethoscope } from 'lucide-react-native';
 import { AttendanceStatus } from '../types';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -13,6 +13,7 @@ export const STATUS_META: Record<AttendanceStatus, { label: string; icon: React.
   yillik_izin: { label: 'Yıllık İzin', icon: Sun },
   mazeret_izni: { label: 'Mazeret İzni', icon: Heart },
   ucretsiz_izin: { label: 'Ücretsiz İzin', icon: PauseCircle },
+  issiz_gunu: { label: 'İşsiz Günü', icon: PowerOff },
   rapor: { label: 'Raporlu', icon: Stethoscope },
 };
 

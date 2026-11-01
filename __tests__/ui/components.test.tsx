@@ -26,7 +26,7 @@ describe('UI bileşenleri', () => {
   });
 
   test('StatusPill: tüm durumlar etiketli', async () => {
-    const durumlar = ['geldi', 'gec_geldi', 'erken_cikti', 'yarim_gun', 'yillik_izin', 'mazeret_izni', 'ucretsiz_izin', 'rapor'];
+    const durumlar = ['geldi', 'gec_geldi', 'erken_cikti', 'yarim_gun', 'yillik_izin', 'mazeret_izni', 'ucretsiz_izin', 'issiz_gunu', 'rapor'];
     for (const d of durumlar) {
       const { unmount, root } = await render(wrap(<StatusPill status={d as never} />));
       expect(root).toBeTruthy();

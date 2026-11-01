@@ -16,6 +16,7 @@ import {
   ProductionBatch,
   SalaryPayment,
   ScheduleDay,
+  TempWorkLog,
 } from '../types';
 
 /**
@@ -44,6 +45,7 @@ export interface DataDB {
   payroll_items: PayrollItem[];
   salary_payments: SalaryPayment[];
   production_batches: ProductionBatch[];
+  temp_work_logs: TempWorkLog[];
 }
 
 export function emptyDB(): DataDB {
@@ -65,6 +67,7 @@ export function emptyDB(): DataDB {
     payroll_items: [],
     salary_payments: [],
     production_batches: [],
+    temp_work_logs: [],
   };
 }
 

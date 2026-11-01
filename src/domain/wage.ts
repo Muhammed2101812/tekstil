@@ -21,12 +21,14 @@ export function monthlyHoursFor(method: HourlyWageMethod, schedule: ScheduleDay[
   return avg > 0 ? avg : 195;
 }
 
-/** Verilen günde geçerli maaş (effective_from en yakın olan) */
+/** Salary effective on the given day (latest effective_from <= dateStr).
+ * A not-yet-started (future-dated) row must not leak into earlier months:
+ * when no row is effective yet, returns null. */
 export function salaryForDay(salaries: EmployeeSalary[], dateStr: string): EmployeeSalary | null {
   if (salaries.length === 0) return null;
   const sorted = [...salaries].sort((a, b) => a.effective_from.localeCompare(b.effective_from));
   const applicable = sorted.filter((s) => s.effective_from <= dateStr);
-  if (applicable.length === 0) return sorted[0];
+  if (applicable.length === 0) return null;
   return applicable[applicable.length - 1];
 }
 
